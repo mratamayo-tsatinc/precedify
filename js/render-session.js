@@ -1,0 +1,302 @@
+// ---------------------------------------------------------------------------
+// "On-paper" assignment-line layout.
+// ----------------------------------------------------------------------------
+// A student working an expression out by hand writes the "TYPE varname ="
+// left-hand side once, then just "= ..." underneath for every subsequent
+// transformation, reading straight down the "=" column rather than
+// re-parsing "int result" on every line. We mimic that here: the LHS label
+// is shown only on the very first evaluation-panel row (the untouched
+// expression) and the very last (the fully-derived final value) — see
+// callers below — with every row in between rendering a blank space of the
+// exact same width instead.
+//
+// assignLineString() always emits "int result" as the LHS regardless of
+// language (see its definition), so the label text — and therefore its
+// reserved width — is a fixed constant, not something that needs to be
+// recomputed per item/language.
+//
+// Two things must stay a constant width on every row for the "=" to
+// actually land in the same pixel column: this label, and the correctness
+// badge (which only appears on some EVALUATE rows, after Check). Both are
+// wrapped in fixed-width slots so their presence/absence never shifts
+// anything to their right. This depends on .code-out having a single,
+// non-varying font-size across done/current rows (see the CSS) — `ch` units
+// are font-size-relative, so a size difference between rows would silently
+// reintroduce misalignment even with these slots in place.
+// ---------------------------------------------------------------------------
+const ASSIGN_LABEL_TEXT = 'int result'; // matches assignLineString()'s fixed LHS
+const ASSIGN_LABEL_CH = ASSIGN_LABEL_TEXT.length + 1; // +1 for the space before '='
+function renderAssignLabel(show){
+  return h('span',{class:'assign-label', style:`display:inline-block;width:${ASSIGN_LABEL_CH}ch;`}, show ? ASSIGN_LABEL_TEXT+' ' : '');
+}
+// 22px = .step-badge's own 15px width + 7px margin-right, so the slot holds
+// the badge with no extra shift when one is present, and no gap collapse
+// when one isn't.
+function renderBadgeSlot(badge){
+  return h('span',{class:'badge-slot', style:'display:inline-block;width:22px;'}, badge);
+}
+
+// Full step detail as plain text only — used for a hover title / aria-label,
+// never rendered as a visible line. The visible surface is just the badge
+// (see .step-badge) plus the expression's own token colors.
+function stepTooltip(t, revealCorrectness){
+  if(t.action==='SUBSTITUTE') return `substitute ${t.target} → ${formatValue(t.sourceValue)}`;
+  if(t.action==='UNARY') return `apply ${t.op} to ${t.target} → ${formatValue(t.result)}`;
+  const order = (!revealCorrectness || t.wasCorrect==null) ? '' : (t.wasCorrect ? ' (correct order)' : ' (out of order)');
+  return `evaluate ${formatValue(t.target.operands[0])} ${t.target.operator} ${formatValue(t.target.operands[1])} → ${formatValue(t.result)}${order}`;
+}
+
+// ---------------------------------------------------------------------------
+// Answer-key playback controls (per item: {index, playing})
+// ---------------------------------------------------------------------------
+let activePlaybackTimer = null;
+function playbackTogglePlay(){
+  const item = currentItem();
+  if(!item || !item.playback) return;
+  const total = item.canonicalTrace.steps.length;
+  if(item.playback.index >= total) item.playback.index = 0;
+  item.playback.playing = !item.playback.playing;
+  render();
+}
+function playbackStep(delta){
+  const item = currentItem();
+  if(!item || !item.playback) return;
+  const total = item.canonicalTrace.steps.length;
+  item.playback.playing = false;
+  item.playback.index = Math.max(0, Math.min(total, item.playback.index+delta));
+  render();
+}
+function playbackRestart(){
+  const item = currentItem();
+  if(!item || !item.playback) return;
+  item.playback.index = 0;
+  item.playback.playing = false;
+  render();
+}
+
+function renderSession(container){
+  const item = currentItem();
+  const profile = currentProfile();
+
+  container.appendChild(h('div',{class:'session-bar'},
+    h('div',{class:'session-meta'}, h('b',{}, `Item ${state.itemIndex+1}`), ` / ${state.items.length}  ·  ${profile.name}`),
+    h('div',{style:'display:flex;align-items:center;gap:10px;'},
+      h('span',{class:'mode-tag '+state.mode}, state.mode),
+      h('button',{class:'quit-link', onclick:restart},'End session')
+    )
+  ));
+
+  // SOURCE panel
+  const srcPanel = h('div',{class:'source-panel'});
+  srcPanel.appendChild(h('div',{class:'panel-title'},'Original source'));
+  for(const decl of item.decls){
+    srcPanel.appendChild(h('div',{class:'code-line decl-line'}, declLine(decl, state.language)));
+  }
+  const originalExprStr = renderString(item.originalTree);
+  srcPanel.appendChild(h('div',{class:'code-line active-line'}, assignLineString(originalExprStr)));
+  container.appendChild(srcPanel);
+
+  // EVALUATION panel
+  const evalPanel = h('div',{class:'eval-panel'});
+  evalPanel.appendChild(h('div',{class:'panel-title'},'Evaluation'));
+  const timeline = h('div',{class:'timeline'});
+
+  // initial state row
+  const initRow = h('div',{class:'tl-row'+(item.trace.length>0?' done':' current')});
+  initRow.appendChild(h('div',{class:'tl-dot', style:'background:#4b5364;'}));
+  if(item.trace.length===0){
+    // Nothing has been produced yet, so the color map is empty; every
+    // currently-ready operator/token previews stepColor(0), since the
+    // student may pick ANY of them (no forced "correct next" gating).
+    const unresolvedAny0 = collectUnresolvedFlat(item.workingFlat,[]).length>0;
+    initRow.appendChild(h('div',{class:'code-out'}, renderBadgeSlot(null), renderAssignLabel(true), '= ',
+      renderInteractiveFlatExpr(item.workingFlat, new Map(), stepColor(0), null, unresolvedAny0), ';'));
+  } else {
+    // Superseded by later rows below; only its own pending operator/token
+    // (the one recorded as firing at step 0) previews step 0's color.
+    const pend0 = pendingFlatWithColor(item.trace[0], stepColor(0));
+    initRow.appendChild(h('div',{class:'code-out'}, renderBadgeSlot(null), renderAssignLabel(true), '= ',
+      renderStaticFlatExpr(item.originalFlat, new Map(), null, pend0), ';'));
+  }
+  timeline.appendChild(initRow);
+
+  // history rows (each trace step) — every row is rendered from its own real
+  // flat-expression snapshot. colorMap accumulates one color per step so far
+  // (stepColor(i) for step i), and that mapping is permanent: once a value is
+  // tagged with the color of the step that made it, it keeps that color in
+  // every later row, even after it's consumed as an operand by a subsequent
+  // operator. Full step detail ("evaluate 6 + 18 -> 24") is data-only,
+  // exposed via title/aria-label rather than printed as its own line — only
+  // a compact correct/incorrect badge is shown inline with the expression.
+  // Per the brief (§12): the student must never be told during construction
+  // that a selection was right or wrong — that would defeat the reasoning
+  // activity. This applies identically in Practice and Exam; step
+  // correctness is only ever revealed once the item has been checked. The
+  // ONLY behavioral differences between the two modes are (a) whether the
+  // item can be reset/retried, and (b) whether the correct-solution
+  // playback is offered — both handled elsewhere, not here.
+  const revealCorrectness = item.checked;
+  item.trace.forEach((t, i)=>{
+    const isLast = i === item.trace.length-1;
+    const row = h('div',{class:'tl-row'+(isLast?' current':' done')});
+    const color = stepColor(i);
+    const tip = stepTooltip(t, revealCorrectness);
+    row.appendChild(h('div',{class:'tl-dot', style:`background:${color};`+(isLast?`box-shadow:0 0 0 4px ${hexToRgba(color,0.25)};`:''), title:tip}));
+    const badge = (t.action==='EVALUATE' && revealCorrectness)
+      ? h('span',{class:'step-badge '+(t.wasCorrect?'ok':'warn'), title:tip, 'aria-label':tip, role:'img'}, t.wasCorrect?'✓':'!')
+      : null;
+    const colorMap = buildColorMap(item.trace, i+1);
+    // t (this step) is a stable object living in item.trace, not something
+    // recreated on every render — so a flag written onto it here survives
+    // across the many full re-renders that happen for reasons unrelated to
+    // this row (e.g. once per second while the separate answer-key playback
+    // below is auto-advancing, or a click on any other row/control).
+    // Without this, EVERY row — not just the current one — would replay its
+    // value-flash on every one of those unrelated re-renders, since flashId
+    // was previously being passed unconditionally regardless of whether this
+    // exact step had already been shown before.
+    const flashId = t._flashed ? null : t.resultNodeId;
+    t._flashed = true;
+    // The label ('int result') is shown only on the row that holds the
+    // truly final, fully-derived value — not merely the "current" row,
+    // which may still be mid-sequence (more operators left to pick).
+    const isFinalRow = isLast && itemFullyResolved(item);
+    if(isLast){
+      const activeColor = stepColor(item.trace.length); // color for whatever the student clicks next
+      const unresolvedAny = collectUnresolvedFlat(item.workingFlat,[]).length>0;
+      const enterCls = t._entered ? '' : ' row-enter';
+      t._entered = true;
+      row.appendChild(h('div',{class:'code-out'+enterCls}, renderBadgeSlot(badge), renderAssignLabel(isFinalRow), '= ',
+        renderInteractiveFlatExpr(item.workingFlat, colorMap, activeColor, flashId, unresolvedAny), ';'));
+    } else {
+      const nextStep = item.trace[i+1];
+      const pend = pendingFlatWithColor(nextStep, stepColor(i+1));
+      row.appendChild(h('div',{class:'code-out'}, renderBadgeSlot(badge), renderAssignLabel(false), '= ',
+        renderStaticFlatExpr(item.history[i+1], colorMap, flashId, pend), ';'));
+    }
+    timeline.appendChild(row);
+  });
+
+  evalPanel.appendChild(timeline);
+  container.appendChild(evalPanel);
+
+  // action bar
+  const canUndo = !item.checked && item.history.length>1;
+  const canCheck = !item.checked && itemFullyResolved(item);
+  const canReset = state.mode==='practice' && !item.checked && item.trace.length>0;
+
+  const actionBar = h('div',{class:'action-bar'},
+    h('div',{class:'btn-group'},
+      h('button',{class:'btn', disabled: !canUndo, onclick:handleUndo}, '↶ Undo'),
+      canReset ? h('button',{class:'btn btn-ghost', onclick:handleReset}, 'Reset item') : null
+    ),
+    h('button',{class:'btn btn-primary', disabled: !canCheck, onclick:handleCheck}, 'Check answer')
+  );
+  container.appendChild(actionBar);
+
+  if(!itemFullyResolved(item) && !item.checked){
+    const unresolvedCount = collectUnresolvedFlat(item.workingFlat,[]).length;
+    if(unresolvedCount>0){
+      container.appendChild(h('p',{class:'helper-text'}, `Resolve ${unresolvedCount} more highlighted token${unresolvedCount>1?'s':''} (variable, constant, or unary) before operators become active.`));
+    } else {
+      container.appendChild(h('p',{class:'helper-text'}, 'Tap any highlighted operator to evaluate it — you choose the order. Wrong order is allowed; you\'ll see how it plays out.'));
+    }
+  }
+
+  // feedback
+  if(item.checked){
+    const correct = item.wasCorrectFinal;
+    // The whole session view is torn down and rebuilt on every render() call
+    // (including once per second while answer-key playback is auto-advancing),
+    // so a brand-new .feedback DOM node is created every single tick even
+    // though the box itself never actually re-appears. An unconditional
+    // "pop in" animation class would therefore replay on every tick, making
+    // the whole box look like it's blinking. `_feedbackAnimated` is a plain
+    // flag on the persistent item object (not the DOM), so it survives
+    // across rebuilds and the entrance animation fires exactly once, right
+    // when Check is first pressed.
+    const fbEnterCls = item._feedbackAnimated ? '' : ' feedback-enter';
+    item._feedbackAnimated = true;
+    const fb = h('div',{class:'feedback '+(correct?'correct':'incorrect')+fbEnterCls});
+    fb.appendChild(h('div',{class:'feedback-head'}, correct ? '✓ Correct' : '✕ Incorrect'));
+    fb.appendChild(h('div',{class:'feedback-body'},
+      correct
+        ? h('span',{}, 'Your derived result matches the independently calculated answer: ', h('span',{class:'num'}, String(item.correctFinalValue)), '.')
+        : h('span',{}, 'Your derived result was ', h('span',{class:'num'}, String(item.studentFinal)), '. The correct result is ', h('span',{class:'num'}, String(item.correctFinalValue)), '.')
+    ));
+    fb.appendChild(h('div',{class:'feedback-stats'},
+      h('div',{class:'stat'}, h('div',{class:'sv'}, `${item.correctSteps}/${item.totalOpSteps}`), h('div',{class:'sl'},'steps in correct order')),
+      h('div',{class:'stat'}, h('div',{class:'sv'}, `${Math.round(item.itemScore*100)}%`), h('div',{class:'sl'},'item score'))
+    ));
+    if(state.mode==='practice'){
+      fb.appendChild(h('button',{class:'solution-toggle', onclick:toggleSolution}, item.showSolution ? 'Hide correct solution' : 'Show correct solution'));
+      if(item.showSolution){
+        fb.appendChild(renderCanonicalPlayback(item));
+      }
+    }
+    container.appendChild(fb);
+
+    const bottomBar = h('div',{class:'action-bar'},
+      state.mode==='practice'
+        ? h('div',{class:'btn-group'},
+            h('button',{class:'btn', onclick:handleRetrySameItem}, '↻ Try again'),
+            h('button',{class:'btn btn-ghost', onclick:handleNewRandomAttempt}, 'New random expression')
+          )
+        : h('span',{}),
+      h('button',{class:'btn btn-primary', onclick:handleNextItem},
+        state.itemIndex < state.items.length-1 ? 'Next item →' : 'Finish session →')
+    );
+    container.appendChild(bottomBar);
+  }
+}
+
+function renderCanonicalPlayback(item){
+  const pb = item.playback;
+  const total = item.canonicalTrace.steps.length;
+
+  const wrap = h('div',{class:'solution-playback'});
+  wrap.appendChild(h('div',{class:'playback-controls'},
+    h('button',{class:'btn playback-btn', disabled: pb.index<=0, onclick:()=>playbackStep(-1)}, '⏮ Prev'),
+    h('button',{class:'btn btn-primary playback-btn', onclick:playbackTogglePlay},
+      pb.playing ? '⏸ Pause' : (pb.index>=total ? '↻ Replay' : '▶ Play')),
+    h('button',{class:'btn playback-btn', disabled: pb.index>=total, onclick:()=>playbackStep(1)}, 'Next ⏭'),
+    h('span',{class:'playback-progress'}, `${pb.index} / ${total} steps`)
+  ));
+
+  const timeline = h('div',{class:'timeline solution-timeline'});
+
+  const state0Row = h('div',{class:'tl-row'+(pb.index===0?' current':' done')});
+  state0Row.appendChild(h('div',{class:'tl-dot', style:'background:#4b5364;'}));
+  const pend0 = pendingNodeId(item.canonicalTrace.steps[0], item.canonicalTrace.treeStates[0]);
+  state0Row.appendChild(h('div',{class:'code-out'+(pb.index===0?' row-enter':'')}, renderAssignLabel(true), '= ',
+    renderStaticExpr(item.canonicalTrace.treeStates[0], 0, new Map(), null, pend0, stepColor(0)), ';'));
+  timeline.appendChild(state0Row);
+
+  // Loop over EVERY step (0..total-1), not just the ones revealed so far.
+  // A row for a not-yet-reached step is still built — same markup, same
+  // font-size, same height — so the timeline's total height is fixed at its
+  // maximum on the very first render of this panel. Only its visibility
+  // (via the .tl-future class) changes as pb.index advances; nothing is
+  // ever appended afterward, so nothing below this panel has to shift.
+  for(let i=0; i<total; i++){
+    const revealed = i < pb.index;
+    const t = item.canonicalTrace.steps[i];
+    const isLast = i === pb.index-1;
+    const isFinalStep = i === total-1; // the step that resolves to the single derived value
+    const color = stepColor(i);
+    const row = h('div',{class:'tl-row'+(isLast?' current':' done')+(revealed?'':' tl-future')});
+    row.appendChild(h('div',{class:'tl-dot', style:`background:${color};`+(isLast&&revealed?`box-shadow:0 0 0 4px ${hexToRgba(color,0.25)};`:''), title: revealed ? stepTooltip(t) : null}));
+    // Unrevealed rows get no color map / pending preview / flash — they're
+    // laid out (for height) but must not visually leak the upcoming value.
+    const colorMap = revealed ? buildColorMap(item.canonicalTrace.steps, i+1) : new Map();
+    const nextStep = item.canonicalTrace.steps[i+1];
+    const pendId = revealed && nextStep ? pendingNodeId(nextStep, item.canonicalTrace.treeStates[i+1]) : null;
+    row.appendChild(h('div',{class:'code-out'+(isLast&&revealed?' row-enter':'')}, renderAssignLabel(isFinalStep), '= ',
+      renderStaticExpr(item.canonicalTrace.treeStates[i+1], 0, colorMap, isLast&&revealed ? t.resultNodeId : null, pendId, revealed&&nextStep ? stepColor(i+1) : null), ';'));
+    timeline.appendChild(row);
+  }
+
+  wrap.appendChild(timeline);
+  return wrap;
+}
+

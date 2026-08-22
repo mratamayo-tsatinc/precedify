@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Precedify</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+<link rel="stylesheet" href="css/styles.css">
+</head>
+<body>
+<div class="wrap">
+  <div class="brand"><span class="mark"><i class="fa-solid fa-layer-group"></i></span><h1>Precedify</h1></div>
+  <p class="tagline">Learn how computers evaluate expressions using precedence rules, one operator at a time. Selecting a token doesn't test your arithmetic — it tests whether you know what happens next.</p>
+  <div id="app"></div>
+</div>
+
+<!--
+  Each file below holds ONE logical module (no file combines unrelated
+  code) and is loaded as a classic (non-module) script, so they all share
+  a single global scope/realm — exactly as if this were still one inline
+  <script> block — which is why top-level `function`/`const`/`let` in an
+  earlier file can be referenced by a later one with no imports/exports
+  needed. Order matters: each file is listed after everything it depends on.
+-->
+<script src="js/engine.js"></script>
+<script src="js/flat-model.js"></script>
+<script src="js/generator.js"></script>
+<script src="js/language.js"></script>
+<script src="js/state.js"></script>
+<script src="js/dom-helpers.js"></script>
+<script src="js/render-tree.js"></script>
+<script src="js/render-flat.js"></script>
+<script src="js/render-setup.js"></script>
+<script src="js/render-session.js"></script>
+<script src="js/render-done.js"></script>
+<script src="js/main.js"></script>
+</body>
+</html>
