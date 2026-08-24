@@ -82,6 +82,11 @@ function renderSession(container){
     h('div',{class:'session-meta'}, h('b',{}, `Item ${state.itemIndex+1}`), ` / ${state.items.length}  ·  ${profile.name}`),
     h('div',{style:'display:flex;align-items:center;gap:10px;'},
       h('span',{class:'mode-tag '+state.mode}, state.mode),
+      // Toggles the operator→result connector line (connector-lines.js).
+      // Purely a display preference; has no effect on scoring or trace data.
+      h('button',{class:'link-toggle'+(state.showConnectors?' active':''), onclick:toggleConnectors,
+        title:'Toggle the connector line between an operator and the value it produces'},
+        state.showConnectors ? '⤵ Links on' : '⤵ Links off'),
       h('button',{class:'quit-link', onclick:restart},'End session')
     )
   ));
@@ -299,4 +304,3 @@ function renderCanonicalPlayback(item){
   wrap.appendChild(timeline);
   return wrap;
 }
-

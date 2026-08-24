@@ -27,9 +27,28 @@ function h(tag, attrs, ...children){
 // long as it survives un-consumed. Once the value is used as an operand in
 // an EVALUATE step, the result is a genuine new literal and is rendered as a
 // plain numeral again (see the literal branches of the callers below).
-function renderValueCard(name, value, kind, color, isFlash){
+//
+// Takes a single named-fields object rather than positional arguments —
+// intentionally, after a positional version caused a real bug: a call site
+// passing arguments in the wrong order/count silently shifted every later
+// param (e.g. a number landing in the `name` slot), which only surfaced as
+// a cryptic "appendChild parameter 1 is not of type Node" deep inside `h`.
+// A required-shape object makes that class of mistake impossible — a typo'd
+// or missing key is undefined/obviously wrong rather than silently shifted.
+//
+// opts: {id, name, value, kind, color, isFlash}
+//   id      - the node's own id (same id it carries in the trace/flat model);
+//             stamped as data-token-id so connector-lines.js can locate this
+//             exact card in the DOM. Has no effect on layout/scoring.
+//   name    - display name shown on the card's header line (e.g. "x", "RATE")
+//   value   - the resolved numeric/boolean value shown on the card's body line
+//   kind    - 'variable' | 'constant' (only used to pick the border style)
+//   color   - optional hex color string (per-step color) for border+text
+//   isFlash - whether to play the brief "just resolved" highlight animation
+function renderValueCard(opts){
+  const {id, name, value, kind, color, isFlash} = opts;
   const cls = 'tok-card '+(kind==='constant' ? 'tok-card-const' : 'tok-card-var')+(isFlash?' tok-card-flash':'');
-  const attrs = {class:cls};
+  const attrs = {class:cls, 'data-token-id': id};
   if(color) attrs.style = `border-color:${color};color:${color};`;
   return h('span', attrs,
     h('span',{class:'tok-card-head'}, name),
@@ -106,4 +125,3 @@ function pendingNodeId(step, treeBefore){
   const n = findBinopByOperandIds(treeBefore, step.leftId, step.rightId);
   return n ? n.id : null;
 }
-

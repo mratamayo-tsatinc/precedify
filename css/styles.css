@@ -238,6 +238,36 @@ button:focus-visible, [tabindex]:focus-visible{outline:2px solid var(--op-glow);
    makes the whole assembly the single clickable target that applies the
    operator, mirroring how other ready tokens invite a tap. */
 .unary-token-group{display:inline-flex;align-items:center;gap:1px;}
+/* An inline-flex box sitting inside a line of text is aligned to that line
+   using the BASELINE OF ITS FIRST IN-FLOW CHILD (CSS Flexbox spec) — not a
+   fixed point on the group's own box. Prefix ("++x") puts the small
+   operator glyph first, so the group inherits that glyph's ordinary text
+   baseline. Postfix ("x++") puts the two-line .tok-card first instead, so
+   the group inherits the CARD's own internal baseline (from its value line)
+   — a different anchor point entirely. Same visual component, same
+   surrounding text, but two different alignment rules depending purely on
+   which side the operator happened to render on. That's the actual root
+   cause of the prefix/postfix drift: not a per-token tuning gap, but the
+   browser silently choosing a different anchor for the group depending on
+   child order. Pinning vertical-align explicitly overrides that
+   spec-mandated first-child lookup with one fixed anchor point, so both
+   orders align identically. */
+.unary-token-group{vertical-align:middle;}
+/* A standalone .tok-card (e.g. a resolved constant with no unary operator,
+   like RATE) gets vertical-align:middle PLUS an extra translateY(-4px)
+   nudge (see .tok-card below) — that -4px was tuned empirically so the
+   card's visual center lands correctly relative to surrounding text. Inside
+   a unary-token-group, that same -4px is cancelled on the CARD itself (see
+   .unary-token-group .tok-card below) because stacking it on top of the
+   group's own flex centering pushed the card too far up. But cancelling it
+   there without compensating anywhere else left the group 4px LOWER than a
+   plain standalone card — the exact RATE-vs-x/y offset seen in the
+   screenshots. Applying the same -4px to the GROUP instead (once, to the
+   whole unit) restores parity: both a lone card and a unary-wrapped card
+   now land on the identical final vertical position, since the group's
+   internal card/glyph layout is unaffected by a transform on their shared
+   parent. */
+.unary-token-group{transform:translateY(-4px);}
 /* .tok-card's translateY(-4px) is tuned for a card sitting alone in normal
    inline text flow, nudging it to match the surrounding text baseline. Inside
    a unary-token-group, the card is instead a flex child of a container that
@@ -322,3 +352,33 @@ button:focus-visible, [tabindex]:focus-visible{outline:2px solid var(--op-glow);
 @media (max-width:600px){
   .summary-score{font-size:40px;}
 }
+
+/* ---------- connector lines (connector-lines.js) ---------- */
+.eval-panel{ position:relative; }
+.connector-svg{ position:absolute; left:0; top:0; pointer-events:none; overflow:visible; }
+.connector-line-current{ opacity:0.75; }
+.connector-line-past{ opacity:0.32; stroke-dasharray:3 4; }
+
+/* Applied for the brief synchronous window drawConnectorLines() spends
+   measuring element positions. A row/token that just entered this render
+   (row-enter, tok-card-flash, tok-colored-flash) is mid-CSS-animation at
+   that instant — getBoundingClientRect() would report its STARTING offset,
+   not where it settles a moment later, producing a connector line anchored
+   to the wrong point on exactly the newest step. Canceling the animation
+   for the measurement snapshot forces layout to reflect the element's
+   final resting geometry instead. No visual glitch results: this class is
+   added and removed within one synchronous script execution, before the
+   browser ever paints a frame with it applied, so the entrance animation
+   still plays normally once the class is removed. */
+.eval-panel.connector-measuring .code-out,
+.eval-panel.connector-measuring .tok-card,
+.eval-panel.connector-measuring .unary-token-group{
+  animation: none !important;
+}
+
+.link-toggle{
+  background:none;border:none;color:var(--text-mute);font-size:12.5px;
+  text-decoration:underline;text-underline-offset:2px;
+}
+.link-toggle:hover{ color:var(--text-dim); }
+.link-toggle.active{ color:var(--op-glow); text-decoration:none; }

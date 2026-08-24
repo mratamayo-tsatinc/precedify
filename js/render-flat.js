@@ -6,12 +6,19 @@
 // brief); once true, EVERY currently-ready adjacent operator — including one
 // that reaches across where a parenthesis was in the source — previews the
 // same activeColor and is clickable, since the student picks freely.
+//
+// Every operand/operator DOM node below also carries a data-token-id (for
+// leaf operands) or data-op-left/data-op-right (for operators) attribute.
+// These are inert for rendering/interaction purposes — they exist solely so
+// connector-lines.js can find the exact source/destination element for each
+// step and draw a line between them. Nothing here reads or depends on those
+// attributes.
 // ---------------------------------------------------------------------------
 function renderInteractiveFlatOperand(op, colorMap, activeColor, flashId){
   if(op.kind==='literal'){
     const col = colorMap.get(op.id);
     const isFlash = flashId!=null && op.id===flashId;
-    const attrs = {class:'tok tok-lit'+(col?(isFlash?' tok-colored-flash':' tok-colored'):'')};
+    const attrs = {class:'tok tok-lit'+(col?(isFlash?' tok-colored-flash':' tok-colored'):''), 'data-token-id': op.id};
     if(col) attrs.style = `color:${col};`;
     return h('span',attrs, formatValue(op.value));
   }
@@ -19,7 +26,7 @@ function renderInteractiveFlatOperand(op, colorMap, activeColor, flashId){
     if(op.resolved){
       const col = colorMap.get(op.id);
       const isFlash = flashId!=null && op.id===flashId;
-      const attrs = {class:'tok tok-lit'+(col?(isFlash?' tok-colored-flash':' tok-colored'):'')};
+      const attrs = {class:'tok tok-lit'+(col?(isFlash?' tok-colored-flash':' tok-colored'):''), 'data-token-id': op.id};
       if(col) attrs.style = `color:${col};`;
       return h('span',attrs, formatValue(op.resultValue));
     }
@@ -36,7 +43,7 @@ function renderInteractiveFlatOperand(op, colorMap, activeColor, flashId){
       // produced once it eventually fires.
       const cardColor = colorMap.get(op.id);
       const isFlash = flashId!=null && op.id===flashId;
-      const card = renderValueCard(op.inner.name, unaryBaseValue(op), op.inner.kind, cardColor, isFlash);
+      const card = renderValueCard({id:op.id, name:op.inner.name, value:unaryBaseValue(op), kind:op.inner.kind, color:cardColor, isFlash});
       const opAttrs = {class:'tok tok-op-active'+(cardColor?' tok-colored':'')};
       if(cardColor) opAttrs.style = `color:${cardColor};`;
       const opSpan = h('span',opAttrs, op.op);
@@ -50,7 +57,7 @@ function renderInteractiveFlatOperand(op, colorMap, activeColor, flashId){
     // clicking substitutes its value, same as a plain variable token.
     const nm = op.inner.kind==='literal' ? String(op.inner.value) : op.inner.name;
     const label = op.op==='!' ? ('!'+nm) : (op.form==='prefix' ? op.op+nm : nm+op.op);
-    return h('span',{class:'tok tok-var tok-colored', style:`color:${activeColor};`, tabindex:'0', role:'button', 'aria-label':`substitute ${nm}`,
+    return h('span',{class:'tok tok-var tok-colored', style:`color:${activeColor};`, tabindex:'0', role:'button', 'aria-label':`substitute ${nm}`, 'data-token-id': op.id,
       onclick:()=>handleTokenClick({type:'substitute', id:op.id}),
       onkeydown:(e)=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); handleTokenClick({type:'substitute', id:op.id}); } }
     }, label);
@@ -59,10 +66,10 @@ function renderInteractiveFlatOperand(op, colorMap, activeColor, flashId){
   if(op.resolved){
     const col = colorMap.get(op.id);
     const isFlash = flashId!=null && op.id===flashId;
-    return renderValueCard(op.name, op.declaredValue, op.kind, col, isFlash);
+    return renderValueCard({id:op.id, name:op.name, value:op.declaredValue, kind:op.kind, color:col, isFlash});
   }
   const cls = (op.kind==='variable' ? 'tok tok-var' : 'tok tok-const') + ' tok-colored';
-  return h('span',{class:cls, style:`color:${activeColor};`, tabindex:'0', role:'button', 'aria-label':`substitute ${op.name}`,
+  return h('span',{class:cls, style:`color:${activeColor};`, tabindex:'0', role:'button', 'aria-label':`substitute ${op.name}`, 'data-token-id': op.id,
     onclick:()=>handleTokenClick({type:'substitute', id:op.id}),
     onkeydown:(e)=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); handleTokenClick({type:'substitute', id:op.id}); } }
   }, op.name);
@@ -85,6 +92,7 @@ function renderInteractiveFlatExpr(flat, colorMap, activeColor, flashId, unresol
       const ready = !unresolvedAny && pairReady(L,R,opStr);
       const opCls = 'tok '+(ready ? 'tok-op-active tok-colored' : 'tok-op-muted');
       const opAttrs = {class:opCls, tabindex: ready ? '0' : '-1', role:'button', 'aria-label':`evaluate ${opStr}`,
+        'data-op-left': L.id, 'data-op-right': R.id,
         onclick: ready ? ()=>handleTokenClick({type:'evaluate', leftId:L.id, rightId:R.id}) : null,
         onkeydown: ready ? (e)=>{ if(e.key==='Enter'||e.key===' '){ e.preventDefault(); handleTokenClick({type:'evaluate', leftId:L.id, rightId:R.id}); } } : null
       };
@@ -104,7 +112,7 @@ function renderStaticFlatOperand(op, colorMap, flashId, pending){
   if(op.kind==='literal'){
     const col = colorMap.get(op.id);
     const isFlash = flashId!=null && op.id===flashId;
-    const attrs = {class:'tok tok-lit'+(col?(isFlash?' tok-colored-flash':' tok-colored'):'')};
+    const attrs = {class:'tok tok-lit'+(col?(isFlash?' tok-colored-flash':' tok-colored'):''), 'data-token-id': op.id};
     if(col) attrs.style = `color:${col};`;
     return h('span',attrs, formatValue(op.value));
   }
@@ -112,14 +120,14 @@ function renderStaticFlatOperand(op, colorMap, flashId, pending){
     if(op.resolved){
       const col = colorMap.get(op.id);
       const isFlash = flashId!=null && op.id===flashId;
-      const attrs = {class:'tok tok-lit'+(col?(isFlash?' tok-colored-flash':' tok-colored'):'')};
+      const attrs = {class:'tok tok-lit'+(col?(isFlash?' tok-colored-flash':' tok-colored'):''), 'data-token-id': op.id};
       if(col) attrs.style = `color:${col};`;
       return h('span',attrs, formatValue(op.resultValue));
     }
     if(op.substituted){
       const cardColor = colorMap.get(op.id);
       const isFlash = flashId!=null && op.id===flashId;
-      const card = renderValueCard(op.inner.name, unaryBaseValue(op), op.inner.kind, cardColor, isFlash);
+      const card = renderValueCard({id:op.id, name:op.inner.name, value:unaryBaseValue(op), kind:op.inner.kind, color:cardColor, isFlash});
       const opAttrs = {class:'tok tok-op-muted'+(cardColor?' tok-colored':'')};
       if(cardColor) opAttrs.style = `color:${cardColor};`;
       const opSpan = h('span',opAttrs, op.op);
@@ -129,18 +137,18 @@ function renderStaticFlatOperand(op, colorMap, flashId, pending){
     const nm = op.inner.kind==='literal' ? String(op.inner.value) : op.inner.name;
     const label = op.op==='!' ? ('!'+nm) : (op.form==='prefix' ? op.op+nm : nm+op.op);
     const isPending = pending && pending.type==='substitute' && pending.id===op.id;
-    const attrs = {class:'tok tok-var tok-static'+(isPending?' tok-colored':'')};
+    const attrs = {class:'tok tok-var tok-static'+(isPending?' tok-colored':''), 'data-token-id': op.id};
     if(isPending) attrs.style = `color:${pending.color};`;
     return h('span',attrs, label);
   }
   if(op.resolved){
     const col = colorMap.get(op.id);
     const isFlash = flashId!=null && op.id===flashId;
-    return renderValueCard(op.name, op.declaredValue, op.kind, col, isFlash);
+    return renderValueCard({id:op.id, name:op.name, value:op.declaredValue, kind:op.kind, color:col, isFlash});
   }
   const base = op.kind==='variable' ? 'tok tok-var tok-static' : 'tok tok-const tok-static';
   const isPending = pending && pending.type==='substitute' && pending.id===op.id;
-  const attrs = {class:base+(isPending?' tok-colored':'')};
+  const attrs = {class:base+(isPending?' tok-colored':''), 'data-token-id': op.id};
   if(isPending) attrs.style = `color:${pending.color};`;
   return h('span',attrs, op.name);
 }
@@ -155,12 +163,10 @@ function renderStaticFlatExpr(flat, colorMap, flashId, pending){
     if(i<flat.operators.length){
       const L = flat.operands[i], R = flat.operands[i+1];
       const isPending = pending && pending.type==='evaluate' && pending.leftId===L.id && pending.rightId===R.id;
-      const opAttrs = {class:'tok tok-op-muted'+(isPending?' tok-colored':'')};
+      const opAttrs = {class:'tok tok-op-muted'+(isPending?' tok-colored':''), 'data-op-left': L.id, 'data-op-right': R.id};
       if(isPending) opAttrs.style = `color:${pending.color};`;
       parts.push(' ', h('span',opAttrs, flat.operators[i]), ' ');
     }
   }
   return h('span',{}, ...parts);
 }
-
-

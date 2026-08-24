@@ -8,6 +8,7 @@ const state = {
   profileId: PROFILES[0].id,
   itemCount: 5,
   itemIndex: 0,
+  showConnectors: true, // whether the operator→result connector line (connector-lines.js) is drawn
   items: [], // {originalTree, originalFlat, decls, correctFinalValue, canonicalTrace, workingFlat, history:[], trace:[], checked, itemScore, revealSolution}
 };
 
@@ -271,4 +272,3 @@ function toggleSolution(){
   render();
 }
 function restart(){ state.screen='setup'; render(); }
-

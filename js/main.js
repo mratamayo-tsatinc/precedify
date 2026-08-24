@@ -8,6 +8,11 @@ function render(){
   else renderDone(container);
 
   if(state.screen==='session'){
+    // Draws every operator→result connector line (connector-lines.js) after
+    // the DOM has been built, since it measures real element positions.
+    // No-op when state.showConnectors is false or there's no step yet.
+    drawConnectorLines(currentItem());
+
     const item = currentItem();
     if(item && item.playback && item.playback.playing){
       const total = item.canonicalTrace.steps.length;
