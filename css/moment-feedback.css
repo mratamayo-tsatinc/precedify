@@ -1,0 +1,48 @@
+/* ============================================================================
+   MOMENT-TO-MOMENT FEEDBACK — additive stylesheet
+   ----------------------------------------------------------------------------
+   Loaded alongside styles.css. Every selector here is new — nothing in
+   styles.css is redeclared or overridden — and every class is only ever
+   applied by moment-feedback.js, so this file has zero visual effect unless
+   that script is also present and successfully builds its block. Colors
+   fall back to hard-coded equivalents of styles.css's :root variables (via
+   the second value in each var()) so this still renders sensibly even if
+   styles.css is ever missing, renamed, or reordered.
+   ============================================================================ */
+.moment-feedback-block{ margin-top: 4px; }
+.moment-feedback-block .feedback-stats.mf-stats{ margin-top: 10px; }
+
+.mistake-breakdown{
+  margin-top: 12px;
+  font-size: 12px;
+  color: var(--text-dim, #8890a0);
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 7px;
+}
+.mb-label{ color: var(--text-mute, #4b5364); }
+
+.mistake-chip{
+  font-family: var(--mono, ui-monospace, monospace);
+  font-size: 11.5px;
+  padding: 3px 9px;
+  border-radius: 999px;
+  border: 1px solid var(--line, #262c38);
+  background: var(--panel-alt, #1c2029);
+  color: var(--text-dim, #8890a0);
+}
+.mc-parens{ border-color:#5a3550; color:#ff9fc9; background:rgba(255,90,150,0.06); }
+.mc-tier{ border-color:#5a4d2d; color:#ffcf7a; background:rgba(255,163,92,0.08); }
+.mc-other{ border-color:#33405a; color:#9ec2ff; background:rgba(111,183,255,0.06); }
+
+.clean-badge{
+  margin-top: 10px;
+  display: inline-block;
+  font-size: 12px;
+  color: var(--good, #4fd9b0);
+  background: rgba(79,217,176,0.1);
+  border: 1px solid #2d5544;
+  border-radius: 999px;
+  padding: 4px 11px;
+}

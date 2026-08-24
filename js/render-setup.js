@@ -38,7 +38,7 @@ function renderSetup(container){
     )
   ));
 
-  card.appendChild(h('button',{class:'start-btn', onclick:startSession}, `Start ${state.mode==='exam'?'Exam':'Practice'} →`));
+  card.appendChild(h('button',{class:'start-btn', onclick:startSession}, `Start ${state.mode==='exam'?'Exam':'Practice'} `, h('i',{class:'fa-solid fa-arrow-right'})));
 
   container.appendChild(card);
 }

@@ -86,7 +86,7 @@ function renderSession(container){
       // Purely a display preference; has no effect on scoring or trace data.
       h('button',{class:'link-toggle'+(state.showConnectors?' active':''), onclick:toggleConnectors,
         title:'Toggle the connector line between an operator and the value it produces'},
-        state.showConnectors ? '⤵ Links on' : '⤵ Links off'),
+        h('i',{class:'fa-solid fa-arrow-turn-down'}), state.showConnectors ? ' Links on' : ' Links off'),
       h('button',{class:'quit-link', onclick:restart},'End session')
     )
   ));
@@ -148,7 +148,7 @@ function renderSession(container){
     const tip = stepTooltip(t, revealCorrectness);
     row.appendChild(h('div',{class:'tl-dot', style:`background:${color};`+(isLast?`box-shadow:0 0 0 4px ${hexToRgba(color,0.25)};`:''), title:tip}));
     const badge = (t.action==='EVALUATE' && revealCorrectness)
-      ? h('span',{class:'step-badge '+(t.wasCorrect?'ok':'warn'), title:tip, 'aria-label':tip, role:'img'}, t.wasCorrect?'✓':'!')
+      ? h('span',{class:'step-badge '+(t.wasCorrect?'ok':'warn'), title:tip, 'aria-label':tip, role:'img'}, h('i',{class:'fa-solid '+(t.wasCorrect?'fa-check':'fa-exclamation')}))
       : null;
     const colorMap = buildColorMap(item.trace, i+1);
     // t (this step) is a stable object living in item.trace, not something
@@ -197,7 +197,7 @@ function renderSession(container){
 
   const actionBar = h('div',{class:'action-bar'},
     h('div',{class:'btn-group'},
-      h('button',{class:'btn', disabled: !canUndo, onclick:handleUndo}, '↶ Undo'),
+      h('button',{class:'btn', disabled: !canUndo, onclick:handleUndo}, h('i',{class:'fa-solid fa-rotate-left'}), ' Undo'),
       canReset ? h('button',{class:'btn btn-ghost', onclick:handleReset}, 'Reset item') : null
     ),
     h('button',{class:'btn btn-primary', disabled: !canCheck, onclick:handleCheck}, 'Check answer')
@@ -228,7 +228,7 @@ function renderSession(container){
     const fbEnterCls = item._feedbackAnimated ? '' : ' feedback-enter';
     item._feedbackAnimated = true;
     const fb = h('div',{class:'feedback '+(correct?'correct':'incorrect')+fbEnterCls});
-    fb.appendChild(h('div',{class:'feedback-head'}, correct ? '✓ Correct' : '✕ Incorrect'));
+    fb.appendChild(h('div',{class:'feedback-head'}, h('i',{class:'fa-solid '+(correct?'fa-circle-check':'fa-circle-xmark')}), correct ? ' Correct' : ' Incorrect'));
     fb.appendChild(h('div',{class:'feedback-body'},
       correct
         ? h('span',{}, 'Your derived result matches the independently calculated answer: ', h('span',{class:'num'}, String(item.correctFinalValue)), '.')
@@ -238,6 +238,15 @@ function renderSession(container){
       h('div',{class:'stat'}, h('div',{class:'sv'}, `${item.correctSteps}/${item.totalOpSteps}`), h('div',{class:'sl'},'steps in correct order')),
       h('div',{class:'stat'}, h('div',{class:'sv'}, `${Math.round(item.itemScore*100)}%`), h('div',{class:'sl'},'item score'))
     ));
+    // Additive hook for the moment-to-moment feedback module
+    // (js/moment-feedback.js) — entirely optional. If that script isn't
+    // loaded, or it fails for any reason, this is a silent no-op and the
+    // feedback card renders exactly as it did before that module existed.
+    if(typeof renderMomentFeedbackBlock === 'function'){
+      let mfBlock = null;
+      try{ mfBlock = renderMomentFeedbackBlock(item); }catch(e){ mfBlock = null; }
+      if(mfBlock) fb.appendChild(mfBlock);
+    }
     if(state.mode==='practice'){
       fb.appendChild(h('button',{class:'solution-toggle', onclick:toggleSolution}, item.showSolution ? 'Hide correct solution' : 'Show correct solution'));
       if(item.showSolution){
@@ -245,16 +254,26 @@ function renderSession(container){
       }
     }
     container.appendChild(fb);
+    // Additive hook for the juice/feel module (js/juice.js) — entirely
+    // optional. fb is already attached to the live DOM at this point, which
+    // spawnConfetti needs for accurate positioning. If the script isn't
+    // loaded, or it fails for any reason, this is a silent no-op.
+    if(typeof renderItemCelebration === 'function'){
+      try{
+        const celebration = renderItemCelebration(item, fb);
+        if(celebration) fb.appendChild(celebration);
+      }catch(e){ /* silent no-op */ }
+    }
 
     const bottomBar = h('div',{class:'action-bar'},
       state.mode==='practice'
         ? h('div',{class:'btn-group'},
-            h('button',{class:'btn', onclick:handleRetrySameItem}, '↻ Try again'),
+            h('button',{class:'btn', onclick:handleRetrySameItem}, h('i',{class:'fa-solid fa-rotate-right'}), ' Try again'),
             h('button',{class:'btn btn-ghost', onclick:handleNewRandomAttempt}, 'New random expression')
           )
         : h('span',{}),
       h('button',{class:'btn btn-primary', onclick:handleNextItem},
-        state.itemIndex < state.items.length-1 ? 'Next item →' : 'Finish session →')
+        state.itemIndex < state.items.length-1 ? 'Next item ' : 'Finish session ', h('i',{class:'fa-solid fa-arrow-right'}))
     );
     container.appendChild(bottomBar);
   }
@@ -266,10 +285,10 @@ function renderCanonicalPlayback(item){
 
   const wrap = h('div',{class:'solution-playback'});
   wrap.appendChild(h('div',{class:'playback-controls'},
-    h('button',{class:'btn playback-btn', disabled: pb.index<=0, onclick:()=>playbackStep(-1)}, '⏮ Prev'),
+    h('button',{class:'btn playback-btn', disabled: pb.index<=0, onclick:()=>playbackStep(-1)}, h('i',{class:'fa-solid fa-backward-step'}), ' Prev'),
     h('button',{class:'btn btn-primary playback-btn', onclick:playbackTogglePlay},
-      pb.playing ? '⏸ Pause' : (pb.index>=total ? '↻ Replay' : '▶ Play')),
-    h('button',{class:'btn playback-btn', disabled: pb.index>=total, onclick:()=>playbackStep(1)}, 'Next ⏭'),
+      pb.playing ? h('span',{}, h('i',{class:'fa-solid fa-pause'}), ' Pause') : (pb.index>=total ? h('span',{}, h('i',{class:'fa-solid fa-rotate-right'}), ' Replay') : h('span',{}, h('i',{class:'fa-solid fa-play'}), ' Play'))),
+    h('button',{class:'btn playback-btn', disabled: pb.index>=total, onclick:()=>playbackStep(1)}, 'Next ', h('i',{class:'fa-solid fa-forward-step'})),
     h('span',{class:'playback-progress'}, `${pb.index} / ${total} steps`)
   ));
 

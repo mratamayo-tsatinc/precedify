@@ -22,5 +22,14 @@ function renderDone(container){
   card.appendChild(list);
   card.appendChild(h('button',{class:'start-btn', onclick:restart, style:'margin-top:26px;'}, 'New session'));
   container.appendChild(card);
+  // Additive hook for the juice/feel module (js/juice.js) — entirely
+  // optional. card is already attached to the live DOM at this point.
+  // Silent no-op if the script isn't loaded or fails for any reason.
+  if(typeof renderSessionCelebration === 'function'){
+    try{
+      const heroEl = card.querySelector('.summary-hero') || card;
+      renderSessionCelebration(heroEl);
+    }catch(e){ /* silent no-op */ }
+  }
 }
 
