@@ -294,7 +294,10 @@ button:focus-visible, [tabindex]:focus-visible{outline:2px solid var(--op-glow);
 .tok-static:hover{background:none;}
 
 /* ---------- answer-key playback ---------- */
-.solution-playback{margin-top:14px;border-top:1px solid var(--line);padding-top:14px;}
+/* position:relative so its own connector-svg overlay (connector-lines.js
+   drawCanonicalConnectorLines) can be absolutely positioned against this
+   panel, exactly like .eval-panel does for the main session timeline. */
+.solution-playback{margin-top:14px;border-top:1px solid var(--line);padding-top:14px;position:relative;}
 .playback-controls{display:flex;align-items:center;gap:8px;margin-bottom:12px;flex-wrap:wrap;}
 .playback-btn{padding:7px 12px;font-size:12.5px;}
 .playback-progress{font-family:var(--mono);font-size:11.5px;color:var(--text-mute);margin-left:2px;}
@@ -359,20 +362,25 @@ button:focus-visible, [tabindex]:focus-visible{outline:2px solid var(--op-glow);
 .connector-line-current{ opacity:0.75; }
 .connector-line-past{ opacity:0.32; stroke-dasharray:3 4; }
 
-/* Applied for the brief synchronous window drawConnectorLines() spends
-   measuring element positions. A row/token that just entered this render
-   (row-enter, tok-card-flash, tok-colored-flash) is mid-CSS-animation at
-   that instant — getBoundingClientRect() would report its STARTING offset,
-   not where it settles a moment later, producing a connector line anchored
-   to the wrong point on exactly the newest step. Canceling the animation
-   for the measurement snapshot forces layout to reflect the element's
-   final resting geometry instead. No visual glitch results: this class is
-   added and removed within one synchronous script execution, before the
-   browser ever paints a frame with it applied, so the entrance animation
-   still plays normally once the class is removed. */
+/* Applied for the brief synchronous window drawConnectorLines() /
+   drawCanonicalConnectorLines() spend measuring element positions, on
+   whichever of the two timeline panels is being measured. A row/token that
+   just entered this render (row-enter, tok-card-flash, tok-colored-flash)
+   is mid-CSS-animation at that instant — getBoundingClientRect() would
+   report its STARTING offset, not where it settles a moment later,
+   producing a connector line anchored to the wrong point on exactly the
+   newest step. Canceling the animation for the measurement snapshot forces
+   layout to reflect the element's final resting geometry instead. No
+   visual glitch results: this class is added and removed within one
+   synchronous script execution, before the browser ever paints a frame
+   with it applied, so the entrance animation still plays normally once the
+   class is removed. */
 .eval-panel.connector-measuring .code-out,
 .eval-panel.connector-measuring .tok-card,
-.eval-panel.connector-measuring .unary-token-group{
+.eval-panel.connector-measuring .unary-token-group,
+.solution-playback.connector-measuring .code-out,
+.solution-playback.connector-measuring .tok-card,
+.solution-playback.connector-measuring .unary-token-group{
   animation: none !important;
 }
 
@@ -382,3 +390,44 @@ button:focus-visible, [tabindex]:focus-visible{outline:2px solid var(--op-glow);
 }
 .link-toggle:hover{ color:var(--text-dim); }
 .link-toggle.active{ color:var(--op-glow); text-decoration:none; }
+
+/* ---------- variable final state (var-final-state.js) ---------- */
+/* Sits at the bottom of the SAME .eval-panel box, separated by a divider —
+   not its own bordered panel — since it's a coda to the evaluation, not a
+   competing section. Static (doesn't depend on trace/checked state), so no
+   entrance animation: it's just always there, same as the Source panel. */
+.var-final-panel{
+  margin-top:8px;padding-top:14px;border-top:1px solid var(--line-soft);
+}
+.var-final-title{
+  font-size:11px;text-transform:uppercase;letter-spacing:0.1em;color:var(--text-mute);
+  font-weight:700;margin-bottom:11px;
+}
+/* Each binding (declared variable OR the statement's own assignment
+   target, "result" — see var-final-state.js's binding model) renders as
+   its own memory card + a short status line underneath, wrapped in a flex
+   row so the section reflows naturally regardless of how many bindings a
+   given profile/expression produces. */
+.var-final-list{display:flex;flex-wrap:wrap;gap:16px;}
+.var-final-row{
+  display:flex;flex-direction:column;align-items:center;gap:6px;
+  min-width:56px;
+}
+/* Cards here sit in a block-level flex column, not inline text, so the
+   inline-flow baseline nudge .tok-card normally applies (tuned for sitting
+   next to running text elsewhere in the app) would just misalign it
+   against its own tag underneath — cancel it in this context only. */
+.var-final-row .tok-card{transform:none;}
+.vf-tag{
+  font-family:var(--ui);font-size:11px;color:var(--text-mute);line-height:1.4;
+  text-align:center;max-width:130px;
+}
+.vf-tag.vf-unchanged{font-style:italic;}
+/* A binding whose trigger has actually fired (prefix mid-derivation, or
+   postfix/target once the statement completes) gets its tag brightened —
+   the same "something happened here" visual language the timeline uses —
+   so a glance down this row flags exactly which bindings have changed so
+   far. The card itself already carries the color of the step that produced
+   its current value (applied inline via renderValueCard's `color` option),
+   so this only needs to lift the tag text to match. */
+.var-final-row.var-final-changed .vf-tag{color:var(--text-dim);}

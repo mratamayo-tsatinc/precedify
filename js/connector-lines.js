@@ -5,40 +5,50 @@
 // state modules so it can be toggled off or removed without touching them.
 // Depends only on:
 //   - state.showConnectors      (declared in state.js)
-//   - item.trace / item.history / stepColor()  (existing data)
-//   - data-token-id / data-op-left / data-op-right attributes that the
-//     flat renderers (render-flat.js) stamp onto their DOM nodes
+//   - item.trace / item.canonicalTrace.steps / stepColor()  (existing data)
+//   - data-token-id / data-op-left / data-op-right attributes that BOTH the
+//     flat renderers (render-flat.js, live session) and the tree renderer
+//     (render-tree.js, answer-key/canonical playback) stamp onto their DOM
+//     nodes — the exact same attribute names/values in both, which is what
+//     lets one shared lookup routine work against either panel.
 //
-// Draws ONE line per trace step, from the operator (or token) that fired on
-// that step to the value it produced. All steps are drawn simultaneously —
-// not just the latest — so the full derivation history is visible at once.
-// To keep that from becoming visual noise, only the MOST RECENT step is
-// drawn as a solid, brighter line; every earlier step is drawn dotted and
-// dimmer, giving "current" a clear visual lead over "history".
+// Draws ONE line per step, from the operator (or token) that fired on that
+// step to the value it produced. All steps drawn so far are shown
+// simultaneously — not just the latest — so the full derivation history is
+// visible at once. To keep that from becoming visual noise, only the MOST
+// RECENT step is drawn as a solid, brighter line; every earlier step is
+// drawn dotted and dimmer, giving "current" a clear visual lead over
+// "history".
 //
-// DOM row <-> history-state mapping this relies on (see render-session.js):
-//   rows[0]            renders item.history[0]  (original, untouched state)
-//   rows[k] (k=1..n)   renders item.history[k]  (state after trace step k-1)
-// So for trace step i, its SOURCE token/operator is inside rows[i] (the
-// state just before it fired) and its RESULT token is inside rows[i+1] (the
-// state just after). This holds whether a given row was rendered statically
-// (renderStaticFlatExpr) or live (renderInteractiveFlatExpr, only ever the
-// very last row) — both stamp the same data-token-id / data-op-* attributes
-// unconditionally, so the lookup logic doesn't need to know which it is.
+// TWO independent timelines use this same logic:
+//   1. The main session timeline (.eval-panel / .tl-row), driven by
+//      item.trace — the student's own step-by-step derivation.
+//   2. The answer-key/canonical playback timeline (.solution-playback /
+//      .solution-timeline), driven by item.canonicalTrace.steps — the one
+//      true correct derivation, revealed incrementally as pb.index
+//      advances. Only steps with index < pb.index are actually revealed
+//      (see render-session.js's tl-future rows), so only that many lines
+//      should ever be drawn there, however many rows exist in the DOM.
+// Both share the identical row <-> state mapping: rows[0] renders the
+// original untouched state, rows[k] (k=1..n) renders the state after step
+// k-1 fired. So for step i, its SOURCE token/operator lives in rows[i] (the
+// state just before it fired) and its RESULT token lives in rows[i+1] (the
+// state just after) — regardless of which of the two timelines/panels it's
+// looked up in.
 //
-// LINE COLOR (must match dom-helpers.js buildColorMap's rule, not raw trace
-// index): a unary token (e.g. "++x") produces TWO distinct trace steps that
-// share the same resultNodeId — a SUBSTITUTE step (reveals the variable's
-// value into its card) followed by a UNARY step (applies the operator to
-// that same node). buildColorMap() deliberately keeps "first-touch wins" for
-// a given resultNodeId, so the post-operator literal ("18") is rendered in
+// LINE COLOR (must match dom-helpers.js buildColorMap's rule, not raw step
+// index): a unary token (e.g. "++x") produces TWO distinct steps that share
+// the same resultNodeId — a SUBSTITUTE step (reveals the variable's value
+// into its card) followed by a UNARY step (applies the operator to that
+// same node). buildColorMap() deliberately keeps "first-touch wins" for a
+// given resultNodeId, so the post-operator literal ("18") is rendered in
 // the SUBSTITUTE step's color, not the UNARY step's own color — a value
 // keeps the color of the step that ORIGINATED it, per that file's contract.
-// If this file colored a step's line by its own raw index (stepColor(i)),
-// the UNARY step's line would be drawn in a different color than the very
-// text it points to. originColorForStep() below re-derives the same
-// "earliest step to touch this resultNodeId" rule so every line's color
-// always matches its destination token's actual displayed color.
+// If a step's line were colored by its own raw index, the UNARY step's line
+// would be drawn in a different color than the very text it points to.
+// originColorForStep() below re-derives the same "earliest step to touch
+// this resultNodeId" rule so every line's color always matches its
+// destination token's actual displayed color, in either timeline.
 //
 // ENDPOINT CURVE SHAPE: fixed-length vertical "lead-in" control points (see
 // `lead` below) force the bezier to approach/leave each end near-vertically
@@ -46,22 +56,21 @@
 // the line reads as plugging into each box rather than swooping past it. A
 // small solid dot at the destination point marks the exact attachment spot.
 //
-// MEASUREMENT-VS-ANIMATION: this function measures live DOM geometry via
+// MEASUREMENT-VS-ANIMATION: this measures live DOM geometry via
 // getBoundingClientRect(), which is only correct once an element is at its
 // resting layout position. A row or token that just entered on THIS render
 // (row-enter, tok-card-flash, tok-colored-flash) is mid-CSS-animation at the
 // moment this runs, so a naive measurement here would capture its transient
 // starting offset instead of where it settles — producing a connector line
 // that looks wrong only for the newest step, then appears to "fix itself"
-// on the very next render. To avoid that, the `.eval-panel` is given a
-// `connector-measuring` class immediately before reading any rects; that
+// on the very next render. To avoid that, the panel being measured is given
+// a `connector-measuring` class immediately before reading any rects; that
 // class force-cancels the relevant entrance animations (see styles.css) so
 // layout reflects each element's final resting position during the
-// measurement pass. The class is removed again before this function
-// returns, and — because all of this happens within a single synchronous
-// script execution with no paint in between — the entrance animations
-// still play normally on screen; only the internal measurement snapshot is
-// affected.
+// measurement pass. The class is removed again before returning, and —
+// because all of this happens within a single synchronous script execution
+// with no paint in between — the entrance animations still play normally
+// on screen; only the internal measurement snapshot is affected.
 // ============================================================================
 
 function toggleConnectors(){
@@ -81,10 +90,11 @@ function findConnectorDestEl(row, step){
 }
 
 // Mirrors buildColorMap()'s "first-touch wins per resultNodeId" rule (see
-// dom-helpers.js), but for a single arbitrary step index rather than a
-// running map — returns the color of the EARLIEST step in `steps` that
-// produced this step's resultNodeId, which is always <= i and is the same
-// color the destination token is actually being displayed in.
+// dom-helpers.js), but for a single arbitrary step index within a given
+// steps array rather than a running map — returns the color of the
+// EARLIEST step that produced this step's resultNodeId, which is always
+// <= i and is the same color the destination token is actually displayed
+// in, whichever timeline `steps` came from.
 function originColorForStep(steps, i){
   const id = steps[i].resultNodeId;
   for(let j=0;j<=i;j++){
@@ -93,44 +103,34 @@ function originColorForStep(steps, i){
   return stepColor(i); // unreachable in practice — step i always matches itself
 }
 
-function drawConnectorLines(item){
-  const existingPanel = document.querySelector('.eval-panel');
-  if(existingPanel){
-    const stale = existingPanel.querySelector('.connector-svg');
-    if(stale) stale.remove();
-  }
-  if(!state.showConnectors) return;
-  if(!item || item.trace.length===0) return;
+// Capped vertical lead-in length for the bezier control points, in px.
+// Capped (via halfGap at each call site) at half the total vertical gap
+// between the two rows so it never overshoots and flips the curve on very
+// short rows.
+const CONNECTOR_MAX_LEAD = 18;
 
-  const panel = existingPanel;
-  if(!panel) return;
-  const rows = panel.querySelectorAll('.tl-row');
-  if(rows.length < item.trace.length+1) return; // DOM not fully in sync yet — skip this pass
-
-  // Freeze entrance animations to their resting state for this synchronous
-  // measurement pass (see file header). Forcing a layout read immediately
-  // after adding the class ensures the style change has actually applied
-  // before any getBoundingClientRect() calls below.
-  panel.classList.add('connector-measuring');
-  void panel.offsetHeight;
-
-  const panelRect = panel.getBoundingClientRect();
+// Shared geometry/color builder used by both timelines below. `steps` is
+// either item.trace or item.canonicalTrace.steps; `rows` is the NodeList of
+// .tl-row elements for whichever panel is being drawn; `visibleCount` is how
+// many of `steps` (from the start) should actually be drawn as lines —
+// item.trace.length for the live session (every step made so far), or
+// pb.index for the solution playback (only steps actually revealed so far,
+// since later rows exist in the DOM already for fixed-height layout but are
+// still `.tl-future` and must not visually leak upcoming values).
+function buildConnectorVisuals(panelRect, rows, steps, visibleCount){
   const paths = [];
   const dots = [];
-  const lastIndex = item.trace.length-1;
+  const lastIndex = visibleCount - 1;
+  if(rows.length < visibleCount+1) return {paths, dots}; // DOM not fully in sync yet
 
-  // Capped vertical lead-in length for the bezier control points, in px.
-  // Capped (via halfGap below) at half the total vertical gap between the
-  // two rows so it never overshoots and flips the curve on very short rows.
-  const MAX_LEAD = 18;
-
-  item.trace.forEach((step, i)=>{
+  for(let i=0;i<visibleCount;i++){
+    const step = steps[i];
     const sourceRow = rows[i];
     const destRow = rows[i+1];
-    if(!sourceRow || !destRow) return;
+    if(!sourceRow || !destRow) continue;
     const srcEl = findConnectorSourceEl(sourceRow, step);
     const dstEl = findConnectorDestEl(destRow, step);
-    if(!srcEl || !dstEl) return;
+    if(!srcEl || !dstEl) continue;
 
     const s = srcEl.getBoundingClientRect(), d = dstEl.getBoundingClientRect();
     const x1 = s.left + s.width/2 - panelRect.left, y1 = s.bottom - panelRect.top;
@@ -139,10 +139,10 @@ function drawConnectorLines(item){
     // Color follows the destination token's ACTUAL displayed color (origin
     // step), not this step's own raw index — see file header re: unary
     // SUBSTITUTE/UNARY pairs sharing a resultNodeId.
-    const color = originColorForStep(item.trace, i);
+    const color = originColorForStep(steps, i);
 
     const halfGap = (y2 - y1) / 2;
-    const lead = Math.min(MAX_LEAD, halfGap>0 ? halfGap : 0);
+    const lead = Math.min(CONNECTOR_MAX_LEAD, halfGap>0 ? halfGap : 0);
     const c1y = y1 + lead, c2y = y2 - lead;
 
     const path = document.createElementNS('http://www.w3.org/2000/svg','path');
@@ -164,17 +164,13 @@ function drawConnectorLines(item){
     dot.setAttribute('fill', color);
     dot.setAttribute('class', 'connector-anchor-dot '+(isCurrent ? 'connector-line-current' : 'connector-line-past'));
     dots.push(dot);
-  });
+  }
 
-  // All measurements are done — restore normal animation behavior before
-  // this function returns. Since no paint has occurred between adding and
-  // removing this class (everything above is synchronous), the entrance
-  // animations play out normally on screen; only the snapshot used to
-  // compute path/dot coordinates was affected.
-  panel.classList.remove('connector-measuring');
+  return {paths, dots};
+}
 
+function appendConnectorSvg(panel, paths, dots){
   if(paths.length===0) return;
-
   const svg = document.createElementNS('http://www.w3.org/2000/svg','svg');
   svg.setAttribute('class','connector-svg');
   svg.setAttribute('width', String(panel.scrollWidth));
@@ -182,4 +178,63 @@ function drawConnectorLines(item){
   paths.forEach(p=>svg.appendChild(p));
   dots.forEach(d=>svg.appendChild(d));
   panel.appendChild(svg);
+}
+
+// ----------------------------------------------------------------------------
+// Main session timeline (.eval-panel), driven by item.trace.
+// ----------------------------------------------------------------------------
+function drawConnectorLines(item){
+  const panel = document.querySelector('.eval-panel');
+  if(panel){
+    const stale = panel.querySelector('.connector-svg');
+    if(stale) stale.remove();
+  }
+  if(!state.showConnectors) return;
+  if(!item || item.trace.length===0) return;
+  if(!panel) return;
+
+  const rows = panel.querySelectorAll('.tl-row');
+
+  // Freeze entrance animations to their resting state for this synchronous
+  // measurement pass (see file header). Forcing a layout read immediately
+  // after adding the class ensures the style change has actually applied
+  // before any getBoundingClientRect() calls below.
+  panel.classList.add('connector-measuring');
+  void panel.offsetHeight;
+
+  const panelRect = panel.getBoundingClientRect();
+  const {paths, dots} = buildConnectorVisuals(panelRect, rows, item.trace, item.trace.length);
+
+  panel.classList.remove('connector-measuring');
+  appendConnectorSvg(panel, paths, dots);
+}
+
+// ----------------------------------------------------------------------------
+// Answer-key/canonical playback timeline (.solution-playback), driven by
+// item.canonicalTrace.steps, revealed incrementally as pb.index advances.
+// Only called (from main.js) when the solution panel is actually showing.
+// ----------------------------------------------------------------------------
+function drawCanonicalConnectorLines(item){
+  const panel = document.querySelector('.solution-playback');
+  if(panel){
+    const stale = panel.querySelector('.connector-svg');
+    if(stale) stale.remove();
+  }
+  if(!state.showConnectors) return;
+  if(!item || !item.showSolution || !item.playback) return;
+  if(!panel) return;
+
+  const pb = item.playback;
+  if(pb.index<=0) return; // nothing revealed yet
+
+  const rows = panel.querySelectorAll('.tl-row');
+
+  panel.classList.add('connector-measuring');
+  void panel.offsetHeight;
+
+  const panelRect = panel.getBoundingClientRect();
+  const {paths, dots} = buildConnectorVisuals(panelRect, rows, item.canonicalTrace.steps, pb.index);
+
+  panel.classList.remove('connector-measuring');
+  appendConnectorSvg(panel, paths, dots);
 }

@@ -15,7 +15,7 @@ function renderStaticExpr(node, ctxPrec, colorMap, flashId, pendingId, pendingCo
   if(node.kind==='literal'){
     const col = colorMap.get(node.id);
     const isFlash = flashId!=null && node.id===flashId;
-    const attrs = {class:'tok tok-lit'+(col?(isFlash?' tok-colored-flash':' tok-colored'):'')};
+    const attrs = {class:'tok tok-lit'+(col?(isFlash?' tok-colored-flash':' tok-colored'):''), 'data-token-id': node.id};
     if(col) attrs.style = `color:${col};`;
     return h('span',attrs, formatValue(node.value));
   }
@@ -27,7 +27,7 @@ function renderStaticExpr(node, ctxPrec, colorMap, flashId, pendingId, pendingCo
   if(node.kind==='variable' || node.kind==='constant'){
     const base = node.kind==='variable' ? 'tok tok-var tok-static' : 'tok tok-const tok-static';
     const isPending = pendingId!=null && node.id===pendingId;
-    const attrs = {class:base+(isPending?' tok-colored':'')};
+    const attrs = {class:base+(isPending?' tok-colored':''), 'data-token-id': node.id};
     if(isPending && pendingColor) attrs.style = `color:${pendingColor};`;
     return h('span',attrs, node.name);
   }
@@ -35,7 +35,7 @@ function renderStaticExpr(node, ctxPrec, colorMap, flashId, pendingId, pendingCo
     if(node.resolved){
       const col = colorMap.get(node.id);
       const isFlash = flashId!=null && node.id===flashId;
-      const attrs = {class:'tok tok-lit'+(col?(isFlash?' tok-colored-flash':' tok-colored'):'')};
+      const attrs = {class:'tok tok-lit'+(col?(isFlash?' tok-colored-flash':' tok-colored'):''), 'data-token-id': node.id};
       if(col) attrs.style = `color:${col};`;
       return h('span',attrs, formatValue(node.resultValue));
     }
@@ -52,7 +52,7 @@ function renderStaticExpr(node, ctxPrec, colorMap, flashId, pendingId, pendingCo
     const nm = node.inner.kind==='literal' ? String(node.inner.value) : node.inner.name;
     const label = node.op==='!' ? ('!'+nm) : (node.form==='prefix' ? node.op+nm : nm+node.op);
     const isPending = pendingId!=null && node.id===pendingId;
-    const attrs = {class:'tok tok-var tok-static'+(isPending?' tok-colored':'')};
+    const attrs = {class:'tok tok-var tok-static'+(isPending?' tok-colored':''), 'data-token-id': node.id};
     if(isPending && pendingColor) attrs.style = `color:${pendingColor};`;
     return h('span',attrs, label);
   }
@@ -60,7 +60,7 @@ function renderStaticExpr(node, ctxPrec, colorMap, flashId, pendingId, pendingCo
   const left = renderStaticExpr(node.left, p, colorMap, flashId, pendingId, pendingColor);
   const right = renderStaticExpr(node.right, p+1, colorMap, flashId, pendingId, pendingColor);
   const isPending = pendingId!=null && node.id===pendingId;
-  const opAttrs = {class:'tok tok-op-muted'+(isPending?' tok-colored':'')};
+  const opAttrs = {class:'tok tok-op-muted'+(isPending?' tok-colored':''), 'data-op-left': node.left.id, 'data-op-right': node.right.id};
   if(isPending && pendingColor) opAttrs.style = `color:${pendingColor};`;
   const opSpan = h('span',opAttrs, node.op);
   const wrap = h('span',{}, left, ' ', opSpan, ' ', right);

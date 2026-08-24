@@ -12,6 +12,11 @@ function render(){
     // the DOM has been built, since it measures real element positions.
     // No-op when state.showConnectors is false or there's no step yet.
     drawConnectorLines(currentItem());
+    // Same treatment for the answer-key/canonical playback timeline, when
+    // it's currently showing — a separate DOM subtree (.solution-playback)
+    // driven by item.canonicalTrace.steps rather than item.trace. No-op
+    // when the solution isn't open or no step has been revealed yet.
+    drawCanonicalConnectorLines(currentItem());
 
     const item = currentItem();
     if(item && item.playback && item.playback.playing){

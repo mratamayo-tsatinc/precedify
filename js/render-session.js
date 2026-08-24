@@ -183,6 +183,11 @@ function renderSession(container){
   });
 
   evalPanel.appendChild(timeline);
+  // Static reference section, independent of trace progress — see
+  // var-final-state.js for why it's always shown in full regardless of how
+  // far the student has gotten.
+  const varFinalSection = renderVariableFinalState(item);
+  if(varFinalSection) evalPanel.appendChild(varFinalSection);
   container.appendChild(evalPanel);
 
   // action bar

@@ -38,7 +38,8 @@ function startSession(){
       totalOpSteps: 0,
       wasCorrectFinal: null,
       showSolution: false,
-      playback: null
+      playback: null,
+      _bindings: null // lazily built by var-final-state.js (ensureBindings)
     });
   }
   state.itemIndex = 0;
@@ -135,6 +136,7 @@ function handleReset(){
   item.workingFlat = deepCloneFlat(item.originalFlat);
   item.history = [deepCloneFlat(item.originalFlat)];
   item.trace = [];
+  item._bindings = null;
   render();
 }
 // ============================================================================
@@ -243,6 +245,7 @@ function handleRetrySameItem(){
   item.showSolution = false;
   item.playback = null;
   item._feedbackAnimated = false;
+  item._bindings = null;
   render();
 }
 function handleNewRandomAttempt(){
@@ -257,7 +260,8 @@ function handleNewRandomAttempt(){
     originalTree: inst.tree, originalFlat: flat0, decls: inst.decls, correctFinalValue: inst.correctFinalValue,
     canonicalTrace: inst.canonicalTrace, workingFlat: deepCloneFlat(flat0),
     history:[deepCloneFlat(flat0)], trace:[], checked:false, itemScore:null, points:null, maxPoints:null,
-    correctSteps:0, totalOpSteps:0, wasCorrectFinal:null, showSolution:false, playback:null
+    correctSteps:0, totalOpSteps:0, wasCorrectFinal:null, showSolution:false, playback:null,
+    _bindings: null
   };
   render();
 }

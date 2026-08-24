@@ -25,6 +25,12 @@ const PROFILES = [
   {id:'parens-override', name:'Parentheses Override', description:'Shows how explicit grouping overrides the normal precedence order — requires choosing to resolve the group first rather than being the only option available.',
    operatorCount:3, allowedOperators:['+','-','*','/'], operandSources:{literal:4,variable:0,constant:0},
    operandRange:{min:1,max:15}, allowNegativeOperands:false, parentheses:true, evaluationPattern:'PARENTHESES_REQUIRED'},
+  {id:'parens-override-multi', name:'Parentheses Override (Multi-Operator)', description:'The parenthesized region itself contains two operators from different precedence tiers — the override forces that whole nested piece to resolve first as a unit, not just a single pair.',
+   operatorCount:4, allowedOperators:['+','-','*','/'], operandSources:{literal:5,variable:0,constant:0},
+   operandRange:{min:1,max:15}, allowNegativeOperands:false, parentheses:true, evaluationPattern:'PARENTHESES_REQUIRED_MULTI'},
+  {id:'parens-override-dual', name:'Parentheses Override (Two Separate Groups)', description:'Two independent parenthesized groups appear side by side in the same expression — not nested inside each other — and each group overrides a different precedence tier.',
+   operatorCount:4, allowedOperators:['+','-','*','/','%'], operandSources:{literal:5,variable:0,constant:0},
+   operandRange:{min:1,max:15}, allowNegativeOperands:false, parentheses:true, evaluationPattern:'PARENTHESES_REQUIRED_DUAL'},
   {id:'variables-arithmetic', name:'Variables + Arithmetic', description:'Introduces variable substitution before evaluation order becomes relevant.',
    operatorCount:2, allowedOperators:['+','-','*'], operandSources:{literal:0,variable:3,constant:0},
    operandRange:{min:1,max:20}, allowNegativeOperands:false, parentheses:false, evaluationPattern:'PRECEDENCE_REQUIRED'},
@@ -47,6 +53,9 @@ const PROFILES = [
    unaryWrap:{enabled:true, operators:['++','--'], forms:['prefix','postfix'], fraction:0.6}},
   {id:'relational-simple', name:'Relational Operators (Simple)', description:'A comparison (<, >, <=, >=, ==, !=) produces a boolean result — the arithmetic on either side still resolves first.',
    operatorCount:2, allowedOperators:['+','-','<','>','<=','>=','==','!='], operandSources:{literal:3,variable:0,constant:0},
+   operandRange:{min:1,max:20}, allowNegativeOperands:false, parentheses:false, evaluationPattern:'PRECEDENCE_REQUIRED'},
+  {id:'relational-variables', name:'Relational Operators with Variables', description:'A comparison\u2019s operands include variables and constants, not just literals — they must be substituted before the comparison (and any arithmetic feeding it) can resolve.',
+   operatorCount:2, allowedOperators:['+','-','<','>','<=','>=','==','!='], operandSources:{literal:1,variable:1,constant:1},
    operandRange:{min:1,max:20}, allowNegativeOperands:false, parentheses:false, evaluationPattern:'PRECEDENCE_REQUIRED'},
   {id:'relational-boolean-mix', name:'Relational + Boolean Mix (with !)', description:'A relational comparison is combined with boolean variables using && / ||, including one negated with a leading !.',
    operatorCount:3, allowedOperators:['<','>','<=','>=','==','!=','&&','||'], operandSources:{literal:2,variable:2,constant:0},
@@ -205,8 +214,73 @@ function buildParenOverride(operands,profile){
   for(let i=2;i<operands.length;i++) tree = makeBinOp(highOp, tree, operands[i]);
   return tree;
 }
+// Like buildParenOverride, but the forced-parens region itself contains TWO
+// operators from different precedence tiers, not just one pair. Built
+// directly in precedence-correct shape — o0 lowOp (o1 highOp o2) — so on
+// its own (with nothing wrapping it) this inner piece would already print
+// unparenthesized, exactly like ordinary source: "o0 + o1 * o2" needs no
+// grouping by itself, since normal precedence already resolves it
+// unambiguously. What forces the parens is wrapping that whole inner piece
+// with a THIRD operator whose precedence is higher than the inner region's
+// own top-level operator (lowOp) — at that point tagParenGroups sees the
+// inner root's precedence fall below the surrounding context and marks the
+// entire inner region (both of its operators, all three of its leaves) as
+// one shared required-parens group. This needs at least one operand beyond
+// the inner three to wrap with, so profiles using this pattern must supply
+// operatorCount >= 3 (i.e. operands.length >= 4) — enforced via the
+// profile's own operatorCount, same as buildParenOverride's implicit
+// assumption.
+function buildParenOverrideMulti(operands,profile){
+  const lowOps = profile.allowedOperators.filter(o=>CLASS_LOW.includes(o));
+  const highOps = profile.allowedOperators.filter(o=>CLASS_HIGH.includes(o));
+  const lowOp = pick(lowOps.length?lowOps:['+']);
+  const highOp = pick(highOps.length?highOps:['*']);
+  const innerHighNode = makeBinOp(highOp, operands[1], operands[2]);
+  let tree = makeBinOp(lowOp, operands[0], innerHighNode);
+  for(let i=3;i<operands.length;i++) tree = makeBinOp(highOp, tree, operands[i]);
+  return tree;
+}
+// TWO SEPARATE (non-nested) required-parens groups in the same expression —
+// e.g. "(o0 + o1) * (o2 - o3)". A single connector operator ties both groups
+// together and is what forces BOTH into parens. For a group's parentheses to
+// be a genuine PRECEDENCE override (rather than merely an associativity/
+// grouping requirement), that group's own operator must have STRICTLY LOWER
+// precedence than the connector — so both Group A and Group B are drawn from
+// the low tier (+/-) and the connector is always drawn from the high tier
+// (*, /, %): low(5) < high(6) on both sides. tagParenGroups (flat-model.js)
+// then forces each into its own required-parens group via the same rule in
+// both cases — the connector's own tier exceeding the group's tier — with no
+// reliance on the separate (and weaker) right-child associativity-bump rule
+// that a same-tier group would otherwise need.
+// Any operands beyond the first four are folded onto the outside using the
+// same connector, which never disturbs either group: each recursive
+// tagParenGroups call only ever looks at its own immediate local context,
+// so wrapping further out doesn't change what Group A/B saw. Needs
+// operands.length >= 4 (operatorCount >= 3) for both groups to exist.
+function buildParenOverrideDual(operands,profile){
+  const lowOps = profile.allowedOperators.filter(o=>CLASS_LOW.includes(o));
+  const highOps = profile.allowedOperators.filter(o=>CLASS_HIGH.includes(o));
+  // Both groups must contain an operator with STRICTLY LOWER precedence than
+  // the connector tying them together, or the parentheses around that group
+  // aren't a genuine precedence override -- they'd just be enforcing
+  // associativity/grouping, a different (and, for this profile, mislabeled)
+  // lesson. So both groups are drawn from the low tier (+/-), and only the
+  // connector is drawn from the high tier (*, /, %); that guarantees
+  // lowTier(5) < highTier(6) on both sides, independent of which specific
+  // operator gets picked for A vs B.
+  const lowOpA = pick(lowOps.length?lowOps:['+']);
+  const lowOpB = pick(lowOps.length?lowOps:['+']);
+  const connector = pick(highOps.length?highOps:['*']);
+  const groupA = makeBinOp(lowOpA, operands[0], operands[1]);
+  const groupB = makeBinOp(lowOpB, operands[2], operands[3]);
+  let tree = makeBinOp(connector, groupA, groupB);
+  for(let i=4;i<operands.length;i++) tree = makeBinOp(connector, tree, operands[i]);
+  return tree;
+}
 function buildTree(profile,operands){
   if(profile.evaluationPattern==='PARENTHESES_REQUIRED') return buildParenOverride(operands,profile);
+  if(profile.evaluationPattern==='PARENTHESES_REQUIRED_MULTI') return buildParenOverrideMulti(operands,profile);
+  if(profile.evaluationPattern==='PARENTHESES_REQUIRED_DUAL') return buildParenOverrideDual(operands,profile);
   if(profile.evaluationPattern==='RELATIONAL_BOOLEAN_MIX') return buildRelationalBooleanMix(operands,profile);
   const ops = pickOperators(profile);
   if(profile.evaluationPattern==='LEFT_TO_RIGHT') return foldLeft(operands,ops);
@@ -236,4 +310,3 @@ function generateInstance(profile){
   }
   throw new EngineError('GENERATION_FAILED');
 }
-
