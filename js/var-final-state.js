@@ -14,17 +14,19 @@
 // BINDING MODEL
 // ----------------------------------------------------------------------------
 // Every named storage slot the statement touches — every declared variable
-// AND the statement's own assignment target ("result") — is represented as
-// one BINDING, built once per item and cached on item._bindings. Treating
-// the assignment target as just another binding (rather than a hardcoded
-// special case) is what keeps this agnostic to future changes: a later
-// version that evaluates several statements in sequence would only need to
-// append one more target-kind binding per statement, using the exact same
-// three trigger types below — nothing about resolution/render/flash logic
-// needs to know how many statements exist.
+// AND the statement's own assignment target (item.resultName, a randomly
+// (seeded) chosen name per item — see generator.js's RESULT_NAMES/
+// pickResultName) — is represented as one BINDING, built once per item and
+// cached on item._bindings. Treating the assignment target as just another
+// binding (rather than a hardcoded special case) is what keeps this
+// agnostic to future changes: a later version that evaluates several
+// statements in sequence would only need to append one more target-kind
+// binding per statement, using the exact same three trigger types below —
+// nothing about resolution/render/flash logic needs to know how many
+// statements exist.
 //
 // binding = {
-//   name,            // 'x', 'y', 'result'
+//   name,            // 'x', 'y', or this item's own resultName (e.g. 'total')
 //   kind,             // 'declared' (a variable from the source) | 'target' (an assignment LHS)
 //   trigger,          // when this binding's stored value actually changes:
 //                      //   'static'             — never changes (plain var, or `!`-negated var)
@@ -34,7 +36,7 @@
 //                      //                           been fully derived (postfix ++/--, and every
 //                      //                           assignment target)
 //   declaredValue,    // the value at the top of the source, or undefined for a target (no
-//                      // initializer exists in the source for `result`)
+//                      // initializer exists in the source for the assignment target)
 //   finalValue,       // the value this binding settles to once its trigger fires
 //   unaryNodeId,      // for 'per-step' bindings: the unary node's id, matched against
 //                      // trace step.resultNodeId to find exactly when it fired
@@ -49,9 +51,10 @@
 // itself is a side effect that only matters for whoever reads x afterward.
 // So a postfix variable's on-paper state must stay at its declared value
 // for the entire derivation and only flip once the statement is done —
-// exactly the same moment `result` itself first gets a value. A prefix
-// operator, by contrast, already needs the updated value DURING the
-// expression, so its state flips live, the instant that specific step fires.
+// exactly the same moment the assignment target itself first gets a value.
+// A prefix operator, by contrast, already needs the updated value DURING
+// the expression, so its state flips live, the instant that specific step
+// fires.
 //
 // SCOPE: only leaves whose underlying declaration is `variable` produce a
 // binding (never `constant` — constants are immutable, nothing to report).
@@ -93,8 +96,13 @@ function buildBindingsForItem(item){
   // the source, so unlike every declared binding above it has no
   // declaredValue at all — that's the ONE case that renders "—" prior to
   // commit (see resolveBindingLive/renderBindingCard below).
+  // name comes from this item's own randomly (seeded) chosen assignment
+  // target (see generator.js's RESULT_NAMES/pickResultName, threaded onto
+  // item.resultName in state.js) rather than a hardcoded literal — falls
+  // back to 'result' only if somehow absent, so this section never renders
+  // a blank/undefined binding name.
   bindings.push({
-    name:'result', kind:'target', trigger:'statement-complete',
+    name: item.resultName || 'result', kind:'target', trigger:'statement-complete',
     declaredValue: undefined, finalValue: undefined,
     unaryNodeId:null, op:null, form:null, _flashed:false
   });
@@ -191,12 +199,24 @@ function bindingTagText(binding, live){
     ? `${binding.name}${binding.op} applied — used ${formatValue(binding.declaredValue)} in the expression`
     : `${binding.name}${binding.op} — updates once the statement completes`;
 }
+// Compact on-screen label — the full sentence above (bindingTagText) still
+// exists in full, but only as a hover/focus tooltip (title/aria-label), the
+// same "detail lives in the tooltip, only a short badge shows inline"
+// convention already used for step correctness (see stepTooltip in
+// render-session.js). Keeps this row from wrapping across two lines per
+// card, which is what was eating horizontal/vertical space on mobile.
+function bindingTagShort(binding, live){
+  if(binding.trigger==='static') return 'unchanged';
+  if(binding.kind==='target') return live.committed ? 'assigned' : 'pending';
+  return live.committed ? 'applied' : 'pending';
+}
 
 // Builds the section DOM, or returns null when there's nothing to show at
 // all (no declared variables AND, in principle, no target — in practice
-// `result` always exists, so this only skips the whole section for
-// pure-literal profiles with zero variables... actually `result` still
-// exists then too, so we always render; kept for symmetry/safety).
+// the assignment target always exists, so this only skips the whole
+// section for pure-literal profiles with zero variables... actually the
+// target binding still exists then too, so we always render; kept for
+// symmetry/safety).
 function renderVariableFinalState(item){
   const bindings = ensureBindings(item);
   if(bindings.length===0) return null;
@@ -224,7 +244,11 @@ function renderVariableFinalState(item){
       color: live.flashColor,
       isFlash
     }));
-    row.appendChild(h('span',{class:'vf-tag'+(b.trigger==='static'?' vf-unchanged':'')}, bindingTagText(b, live)));
+    const fullTag = bindingTagText(b, live);
+    row.appendChild(h('span',{class:'vf-tag'+(b.trigger==='static'?' vf-unchanged':''), tabindex:'0', title:fullTag, 'aria-label':fullTag},
+      bindingTagShort(b, live),
+      h('i',{class:'fa-solid fa-circle-info vf-hint-icon', 'aria-hidden':'true'})
+    ));
     list.appendChild(row);
   });
 

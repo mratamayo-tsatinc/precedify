@@ -10,10 +10,20 @@
 // callers below — with every row in between rendering a blank space of the
 // exact same width instead.
 //
-// assignLineString() always emits "int result" as the LHS regardless of
-// language (see its definition), so the label text — and therefore its
-// reserved width — is a fixed constant, not something that needs to be
-// recomputed per item/language.
+// The LHS text is now PER-ITEM, not a fixed constant: each generated item
+// carries its own randomly (seeded) chosen assignment-target name (see
+// generator.js's RESULT_NAMES/pickResultName, threaded onto item.resultName
+// in state.js), so one item might read "int total = ..." while another
+// reads "int outcome = ...". assignLineString() (language.js) mirrors this
+// same name for the source panel's own assignment line.
+//
+// Because the label text now varies in length per item, its reserved width
+// (in `ch` units) can no longer be a single module-level constant — it's
+// computed once per render, from that item's own resultName, and passed
+// into every renderAssignLabel() call for that item so every row (and the
+// canonical-playback panel, which renders the very same item) reserves the
+// identical width. That's still the important invariant: within one item's
+// own rows, the width must never vary, or the "=" column drifts.
 //
 // Two things must stay a constant width on every row for the "=" to
 // actually land in the same pixel column: this label, and the correctness
@@ -24,10 +34,14 @@
 // are font-size-relative, so a size difference between rows would silently
 // reintroduce misalignment even with these slots in place.
 // ---------------------------------------------------------------------------
-const ASSIGN_LABEL_TEXT = 'int result'; // matches assignLineString()'s fixed LHS
-const ASSIGN_LABEL_CH = ASSIGN_LABEL_TEXT.length + 1; // +1 for the space before '='
-function renderAssignLabel(show){
-  return h('span',{class:'assign-label', style:`display:inline-block;width:${ASSIGN_LABEL_CH}ch;`}, show ? ASSIGN_LABEL_TEXT+' ' : '');
+// labelText/labelCh are computed per-item by the caller (see renderSession
+// and renderCanonicalPlayback below) from item.resultName, since the LHS
+// text is no longer a fixed constant. Falls back to a bare space-reserving
+// width of 0 if somehow not supplied, rather than throwing.
+function renderAssignLabel(show, labelText, labelCh){
+  const text = labelText || '';
+  const ch = labelCh || 0;
+  return h('span',{class:'assign-label', style:`display:inline-block;width:${ch}ch;`}, show ? text+' ' : '');
 }
 // 22px = .step-badge's own 15px width + 7px margin-right, so the slot holds
 // the badge with no extra shift when one is present, and no gap collapse
@@ -78,17 +92,19 @@ function renderSession(container){
   const item = currentItem();
   const profile = currentProfile();
 
+  // This item's own assignment-target label text/width — see the header
+  // comment above. Computed once per render and threaded through every
+  // renderAssignLabel() call below (and into renderCanonicalPlayback, which
+  // renders this same item's derivation) so the "=" column lines up
+  // consistently across every row for THIS item.
+  const assignLabelText = 'int ' + (item.resultName || 'result');
+  const assignLabelCh = assignLabelText.length + 1; // +1 for the space before '='
+
+  // Mode tag, links toggle, and exam timer are global app settings, not
+  // per-profile — they now live in the static app header (index.html) and
+  // are kept in sync by main.js's syncGlobalHeaderUI(), not rebuilt here.
   container.appendChild(h('div',{class:'session-bar'},
-    h('div',{class:'session-meta'}, h('b',{}, `Item ${state.itemIndex+1}`), ` / ${state.items.length}  ·  ${profile.name}`),
-    h('div',{style:'display:flex;align-items:center;gap:10px;'},
-      h('span',{class:'mode-tag '+state.mode}, state.mode),
-      // Toggles the operator→result connector line (connector-lines.js).
-      // Purely a display preference; has no effect on scoring or trace data.
-      h('button',{class:'link-toggle'+(state.showConnectors?' active':''), onclick:toggleConnectors,
-        title:'Toggle the connector line between an operator and the value it produces'},
-        h('i',{class:'fa-solid fa-arrow-turn-down'}), state.showConnectors ? ' Links on' : ' Links off'),
-      h('button',{class:'quit-link', onclick:restart},'End session')
-    )
+    h('div',{class:'session-meta'}, h('b',{}, `Item ${state.itemIndex+1}`), ` / ${state.items.length}  ·  ${profile.name}`)
   ));
 
   // SOURCE panel
@@ -98,7 +114,7 @@ function renderSession(container){
     srcPanel.appendChild(h('div',{class:'code-line decl-line'}, declLine(decl, state.language)));
   }
   const originalExprStr = renderString(item.originalTree);
-  srcPanel.appendChild(h('div',{class:'code-line active-line'}, assignLineString(originalExprStr)));
+  srcPanel.appendChild(h('div',{class:'code-line active-line'}, assignLineString(originalExprStr, item.resultName)));
   container.appendChild(srcPanel);
 
   // EVALUATION panel
@@ -114,13 +130,13 @@ function renderSession(container){
     // currently-ready operator/token previews stepColor(0), since the
     // student may pick ANY of them (no forced "correct next" gating).
     const unresolvedAny0 = collectUnresolvedFlat(item.workingFlat,[]).length>0;
-    initRow.appendChild(h('div',{class:'code-out'}, renderBadgeSlot(null), renderAssignLabel(true), '= ',
+    initRow.appendChild(h('div',{class:'code-out'}, renderBadgeSlot(null), renderAssignLabel(true, assignLabelText, assignLabelCh), '= ',
       renderInteractiveFlatExpr(item.workingFlat, new Map(), stepColor(0), null, unresolvedAny0), ';'));
   } else {
     // Superseded by later rows below; only its own pending operator/token
     // (the one recorded as firing at step 0) previews step 0's color.
     const pend0 = pendingFlatWithColor(item.trace[0], stepColor(0));
-    initRow.appendChild(h('div',{class:'code-out'}, renderBadgeSlot(null), renderAssignLabel(true), '= ',
+    initRow.appendChild(h('div',{class:'code-out'}, renderBadgeSlot(null), renderAssignLabel(true, assignLabelText, assignLabelCh), '= ',
       renderStaticFlatExpr(item.originalFlat, new Map(), null, pend0), ';'));
   }
   timeline.appendChild(initRow);
@@ -162,8 +178,8 @@ function renderSession(container){
     // exact step had already been shown before.
     const flashId = t._flashed ? null : t.resultNodeId;
     t._flashed = true;
-    // The label ('int result') is shown only on the row that holds the
-    // truly final, fully-derived value — not merely the "current" row,
+    // The label ('int <resultName>') is shown only on the row that holds
+    // the truly final, fully-derived value — not merely the "current" row,
     // which may still be mid-sequence (more operators left to pick).
     const isFinalRow = isLast && itemFullyResolved(item);
     if(isLast){
@@ -171,12 +187,12 @@ function renderSession(container){
       const unresolvedAny = collectUnresolvedFlat(item.workingFlat,[]).length>0;
       const enterCls = t._entered ? '' : ' row-enter';
       t._entered = true;
-      row.appendChild(h('div',{class:'code-out'+enterCls}, renderBadgeSlot(badge), renderAssignLabel(isFinalRow), '= ',
+      row.appendChild(h('div',{class:'code-out'+enterCls}, renderBadgeSlot(badge), renderAssignLabel(isFinalRow, assignLabelText, assignLabelCh), '= ',
         renderInteractiveFlatExpr(item.workingFlat, colorMap, activeColor, flashId, unresolvedAny), ';'));
     } else {
       const nextStep = item.trace[i+1];
       const pend = pendingFlatWithColor(nextStep, stepColor(i+1));
-      row.appendChild(h('div',{class:'code-out'}, renderBadgeSlot(badge), renderAssignLabel(false), '= ',
+      row.appendChild(h('div',{class:'code-out'}, renderBadgeSlot(badge), renderAssignLabel(false, assignLabelText, assignLabelCh), '= ',
         renderStaticFlatExpr(item.history[i+1], colorMap, flashId, pend), ';'));
     }
     timeline.appendChild(row);
@@ -250,7 +266,7 @@ function renderSession(container){
     if(state.mode==='practice'){
       fb.appendChild(h('button',{class:'solution-toggle', onclick:toggleSolution}, item.showSolution ? 'Hide correct solution' : 'Show correct solution'));
       if(item.showSolution){
-        fb.appendChild(renderCanonicalPlayback(item));
+        fb.appendChild(renderCanonicalPlayback(item, assignLabelText, assignLabelCh));
       }
     }
     container.appendChild(fb);
@@ -265,21 +281,22 @@ function renderSession(container){
       }catch(e){ /* silent no-op */ }
     }
 
-    const bottomBar = h('div',{class:'action-bar'},
-      state.mode==='practice'
-        ? h('div',{class:'btn-group'},
-            h('button',{class:'btn', onclick:handleRetrySameItem}, h('i',{class:'fa-solid fa-rotate-right'}), ' Try again'),
-            h('button',{class:'btn btn-ghost', onclick:handleNewRandomAttempt}, 'New random expression')
-          )
-        : h('span',{}),
-      h('button',{class:'btn btn-primary', onclick:handleNextItem},
-        state.itemIndex < state.items.length-1 ? 'Next item ' : 'Finish session ', h('i',{class:'fa-solid fa-arrow-right'}))
-    );
-    container.appendChild(bottomBar);
+    if(state.mode==='practice'){
+      const bottomBar = h('div',{class:'action-bar'},
+        h('div',{class:'btn-group'},
+          h('button',{class:'btn', onclick:handleRetrySameItem}, h('i',{class:'fa-solid fa-rotate-right'}), ' Try again')
+        )
+      );
+      container.appendChild(bottomBar);
+    }
   }
 }
 
-function renderCanonicalPlayback(item){
+// assignLabelText/assignLabelCh are passed in from renderSession (computed
+// from this same item's item.resultName) rather than recomputed here, so
+// the canonical-playback panel's "=" column lines up with exactly the same
+// reserved width the live session panel above it used for this item.
+function renderCanonicalPlayback(item, assignLabelText, assignLabelCh){
   const pb = item.playback;
   const total = item.canonicalTrace.steps.length;
 
@@ -297,7 +314,7 @@ function renderCanonicalPlayback(item){
   const state0Row = h('div',{class:'tl-row'+(pb.index===0?' current':' done')});
   state0Row.appendChild(h('div',{class:'tl-dot', style:'background:#4b5364;'}));
   const pend0 = pendingNodeId(item.canonicalTrace.steps[0], item.canonicalTrace.treeStates[0]);
-  state0Row.appendChild(h('div',{class:'code-out'+(pb.index===0?' row-enter':'')}, renderAssignLabel(true), '= ',
+  state0Row.appendChild(h('div',{class:'code-out'+(pb.index===0?' row-enter':'')}, renderAssignLabel(true, assignLabelText, assignLabelCh), '= ',
     renderStaticExpr(item.canonicalTrace.treeStates[0], 0, new Map(), null, pend0, stepColor(0)), ';'));
   timeline.appendChild(state0Row);
 
@@ -320,7 +337,7 @@ function renderCanonicalPlayback(item){
     const colorMap = revealed ? buildColorMap(item.canonicalTrace.steps, i+1) : new Map();
     const nextStep = item.canonicalTrace.steps[i+1];
     const pendId = revealed && nextStep ? pendingNodeId(nextStep, item.canonicalTrace.treeStates[i+1]) : null;
-    row.appendChild(h('div',{class:'code-out'+(isLast&&revealed?' row-enter':'')}, renderAssignLabel(isFinalStep), '= ',
+    row.appendChild(h('div',{class:'code-out'+(isLast&&revealed?' row-enter':'')}, renderAssignLabel(isFinalStep, assignLabelText, assignLabelCh), '= ',
       renderStaticExpr(item.canonicalTrace.treeStates[i+1], 0, colorMap, isLast&&revealed ? t.resultNodeId : null, pendId, revealed&&nextStep ? stepColor(i+1) : null), ';'));
     timeline.appendChild(row);
   }

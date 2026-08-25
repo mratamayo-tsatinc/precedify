@@ -15,5 +15,9 @@ function declLine(decl, language){
   if(language==='java') return `final int ${decl.name} = ${decl.value};`;
   return `const int ${decl.name} = ${decl.value};`;
 }
-function assignLineString(exprStr){ return `int result = ${exprStr};`; }
-
+// resultName is the per-item, randomly (seeded) chosen assignment-target
+// name (see generator.js's RESULT_NAMES/pickResultName) — previously this
+// always emitted the hardcoded literal "result" for every item. Falls back
+// to 'result' if a caller somehow doesn't have one (e.g. old/serialized
+// item data missing the field), so this never renders "int undefined = ...;".
+function assignLineString(exprStr, resultName){ return `int ${resultName || 'result'} = ${exprStr};`; }

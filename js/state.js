@@ -2,29 +2,61 @@
 // UI STATE + RENDERING
 // ============================================================================
 const state = {
-  screen: 'setup', // setup | session | done
+  screen: 'login', // login | setup | session | done
+  userEmail: null,
+  userStudentId: null,
   language: 'java',
   mode: 'practice',
   profileId: PROFILES[0].id,
-  itemCount: 5,
   itemIndex: 0,
+  itemIndexByProfile: {}, // Remembers which item each profile was last viewing, so switching profiles via the sidebar returns to that exact item instead of resetting to Item 1
   showConnectors: true, // whether the operator→result connector line (connector-lines.js) is drawn
   items: [], // {originalTree, originalFlat, decls, correctFinalValue, canonicalTrace, workingFlat, history:[], trace:[], checked, itemScore, revealSolution}
+  itemsByProfile: {}, // Stores all generated items per profile for persistence
+  sessionSeed: null, // Seed used for reproducible item generation
 };
+
+// ============================================================================
+// APP SETTINGS
+// ============================================================================
+// Global settings configured during login (via settings modal).
+// These apply to the entire session and cannot be changed during the session.
+//  - mode: 'practice' or 'exam' (set once at login)
+//  - timerMinutes: duration for exam mode (set once at login)
+// ============================================================================
+let appSettings = {
+  mode: 'practice', // 'practice' or 'exam' — set at login, fixed for the session
+  timerMinutes: 15  // duration for exam mode (minutes)
+};
+
+// ============================================================================
+// TIMER STATE — Session-level countdown for exam mode
+// ============================================================================
+// Timer runs for the entire exam session across all items.
+// Starts when startSession() is called (in exam mode) and continues until
+// the session ends or time runs out.
+// ============================================================================
+let timerIntervalId = null;
+let timeRemaining = 0; // in seconds
+let examEndTimestamp = null;
 
 function currentProfile(){ return PROFILES.find(p=>p.id===state.profileId); }
 function currentItem(){ return state.items[state.itemIndex]; }
 
-function startSession(){
-  const profile = currentProfile();
-  state.items = [];
-  for(let i=0;i<state.itemCount;i++){
+function generateItemsForProfile(profileId) {
+  const profile = PROFILES.find(p => p.id === profileId);
+  if (!profile) return [];
+  
+  const items = [];
+  for(let i = 0; i < profile.itemCount; i++) {
     const inst = generateInstance(profile);
     const flat0 = flattenInstance(inst.tree);
-    state.items.push({
+    items.push({
+      profileId: profile.id, // which profile generated this item — scoreItem()/handleCheck() use this to look up that profile's own pointsPerItem, rather than a single global point budget shared by every profile
       originalTree: inst.tree,
       originalFlat: flat0,
       decls: inst.decls,
+      resultName: inst.resultName, // per-item randomly (seeded) chosen name for the "int ___ = ...;" assignment target — see generator.js's RESULT_NAMES/pickResultName. Replaces the old hardcoded literal "result".
       correctFinalValue: inst.correctFinalValue,
       canonicalTrace: inst.canonicalTrace,
       workingFlat: deepCloneFlat(flat0),
@@ -42,9 +74,44 @@ function startSession(){
       _bindings: null // lazily built by var-final-state.js (ensureBindings)
     });
   }
+  return items;
+}
+
+function startSession(){
+  // Generate a seed based on current timestamp if not already set
+  if (!state.sessionSeed) {
+    state.sessionSeed = Date.now() >>> 0; // Use current timestamp as seed
+  }
+  
+  // Initialize seeded random generator
+  initializeSeededRandom(state.sessionSeed);
+  
+  // Apply settings mode
+  state.mode = appSettings.mode;
+  
+  // Generate items for ALL profiles once using the seed
+  state.itemsByProfile = {};
+  PROFILES.forEach(profile => {
+    state.itemsByProfile[profile.id] = generateItemsForProfile(profile.id);
+  });
+  
+  // Set current profile's items
+  state.items = state.itemsByProfile[state.profileId];
   state.itemIndex = 0;
+  
+  // Reset to non-seeded random for other operations
+  resetRandomGenerator();
+  
+  // Reset pagination handler so it gets reattached
+  itemPaginationHandlerAttached = false;
+  
   state.screen = 'session';
   render();
+  
+  // Start timer if exam mode
+  if (appSettings.mode === 'exam') {
+    startTimer();
+  }
 }
 
 function itemFullyResolved(item){
@@ -152,17 +219,37 @@ function handleReset(){
 // gathers the step/final facts and calls scoreItem(), so swapping policies,
 // or adding a new one, never touches the evaluation engine or handleCheck.
 //
-// Every model resolves to RAW POINTS: {points, maxPoints}, both whole
-// numbers scaled against cfg.pointsPerItem — not a bare 0..1 ratio — so the
-// end-of-session summary can show an honest "[earned]/[possible]" score
-// instead of a percentage.
+// Every model resolves to RAW POINTS: {points, maxPoints}, scaled against
+// cfg.pointsPerItem — not a bare 0..1 ratio — so the end-of-session summary
+// can show an honest "[earned]/[possible]" score instead of a percentage.
+// Most models still round to a whole number; PER_CHECK (this app's default
+// — see below) deliberately does NOT, since pointsPerItem is now small
+// (1-3, see generator.js) and rounding an already-small per-check slice to
+// the nearest whole point would collapse most partial-credit outcomes to
+// either 0 or full credit.
+//
+// pointsPerItem is NOT set here anymore: it's now defined PER PROFILE (see
+// generator.js's PROFILES — each profile carries its own pointsPerItem,
+// scaled to that profile's own difficulty). SCORING_CONFIG only owns the
+// *model* (which formula) and its weights, which stay global — every
+// profile is graded by the same formula, just against a different point
+// budget. scoreItem() below takes the active item's profile pointsPerItem
+// as an explicit argument and merges it into a per-call cfg, rather than
+// reading one shared constant.
 // ============================================================================
 const SCORING_CONFIG = {
-  model: 'STEP_PLUS_FINAL',  // any key in ITEM_SCORE_MODELS below
+  model: 'PER_CHECK',        // any key in ITEM_SCORE_MODELS below
   stepWeight: 0.5,            // used by STEP_PLUS_FINAL / PROCESS_FOCUSED only
-  finalWeight: 0.5,           // used by STEP_PLUS_FINAL / PROCESS_FOCUSED only
-  pointsPerItem: 10           // raw point budget each item is worth
+  finalWeight: 0.5             // used by STEP_PLUS_FINAL / PROCESS_FOCUSED only
 };
+
+// Shared rounding helper: keeps a raw points value to 1 decimal place,
+// stripping the floating-point noise that summing several already-rounded
+// decimal values produces (e.g. 0.6+0.6+0.6 === 1.7999999999999998 in JS).
+// Used both when a single item's PER_CHECK score is computed (see below)
+// and anywhere multiple items' .points are added together for a total —
+// see render-done.js / score-summary.js / login.js's computeProfileScore.
+function roundPoints(n){ return Math.round(n*10)/10; }
 
 const ITEM_SCORE_MODELS = {
   // "Final-answer-only" (§14E): the derived value is all that's scored.
@@ -179,8 +266,12 @@ const ITEM_SCORE_MODELS = {
     const ratio = facts.totalOpSteps>0 ? facts.correctSteps/facts.totalOpSteps : 1;
     return {points: Math.round(ratio*cfg.pointsPerItem), maxPoints: cfg.pointsPerItem};
   },
-  // "Step + final" (§14E, and this app's default): step credit and final
-  // credit are both scored and blended by cfg.stepWeight/cfg.finalWeight.
+  // "Step + final", blended by weight (§14E): step credit and final credit
+  // are each turned into a 0..1 ratio first, THEN combined via
+  // cfg.stepWeight/cfg.finalWeight — so, unlike PER_CHECK below, an item
+  // with many steps doesn't let step correctness dominate the final-value
+  // check just because there are more of them; the two checks/final are
+  // weighted as two lump categories, not as N+1 individually equal checks.
   STEP_PLUS_FINAL: (facts, cfg) => {
     const stepRatio = facts.totalOpSteps>0 ? facts.correctSteps/facts.totalOpSteps : 1;
     const ratio = cfg.stepWeight*stepRatio + cfg.finalWeight*(facts.wasCorrectFinal?1:0);
@@ -194,11 +285,45 @@ const ITEM_SCORE_MODELS = {
     const stepRatio = facts.totalOpSteps>0 ? facts.correctSteps/facts.totalOpSteps : 1;
     const ratio = cfg.stepWeight*stepRatio + cfg.finalWeight*(facts.wasCorrectFinal?1:0);
     return {points: Math.round(ratio*cfg.pointsPerItem), maxPoints: cfg.pointsPerItem};
+  },
+  // "Per-check" (this app's default): every individual EVALUATE step AND
+  // the final derived value are each treated as ONE equally-weighted check
+  // — totalOpSteps checks for the steps, plus exactly 1 more for the final
+  // value, so an item with N operator steps has N+1 checks total. The
+  // item's whole pointsPerItem budget is split evenly across those checks,
+  // and the student earns one slice per check they got right. E.g. a
+  // 3-point item with 4 EVALUATE steps has 5 checks (4 steps + 1 final) →
+  // 0.6 pts/check; getting 3/4 steps right and the final value wrong earns
+  // 3 × 0.6 = 1.8 of the 3 points. Unlike STEP_PLUS_FINAL, the final value
+  // is NOT a separate 50%-weighted category — it's just one more check,
+  // worth exactly as much as any individual step, so items with more steps
+  // naturally weight the final value proportionally less. Deliberately not
+  // rounded to a whole number (see the header comment above) — the fixed
+  // small pointsPerItem budgets (1-3) mean whole-number rounding would
+  // erase most partial credit.
+  PER_CHECK: (facts, cfg) => {
+    const totalChecks = facts.totalOpSteps + 1; // every EVALUATE step, plus the final derived value
+    const correctChecks = facts.correctSteps + (facts.wasCorrectFinal ? 1 : 0);
+    const pointPerCheck = cfg.pointsPerItem / totalChecks;
+    const rawPoints = correctChecks * pointPerCheck;
+    // Rounded to 1 decimal place — enough to keep a clean, readable score
+    // (matching the worked example: 3 pts / 5 checks = 0.6/check, 3 correct
+    // checks = 1.8) without floating-point noise like 1.7999999999999998.
+    const points = roundPoints(rawPoints);
+    return {points, maxPoints: cfg.pointsPerItem};
   }
 };
-function scoreItem(facts){
+// pointsPerItem is supplied by the caller (looked up from the ACTIVE item's
+// own profile — see handleCheck() below and generator.js's PROFILES), never
+// read off SCORING_CONFIG directly, since the point budget is now a
+// per-profile authoring decision rather than one global number. Every
+// ITEM_SCORE_MODELS function already just reads cfg.pointsPerItem, so
+// merging it into a fresh per-call cfg object (rather than mutating the
+// shared SCORING_CONFIG) is the only change needed here.
+function scoreItem(facts, pointsPerItem){
   const model = ITEM_SCORE_MODELS[SCORING_CONFIG.model] || ITEM_SCORE_MODELS.STEP_PLUS_FINAL;
-  return model(facts, SCORING_CONFIG);
+  const cfg = Object.assign({}, SCORING_CONFIG, {pointsPerItem});
+  return model(facts, cfg);
 }
 
 function handleCheck(){
@@ -214,7 +339,15 @@ function handleCheck(){
   item.correctSteps = correctSteps;
   item.totalOpSteps = totalOpSteps;
   item.wasCorrectFinal = wasCorrectFinal;
-  const {points, maxPoints} = scoreItem({correctSteps, totalOpSteps, wasCorrectFinal});
+  // Look up the point budget from the profile THIS item was generated
+  // under (item.profileId — stamped in generateItemsForProfile), not
+  // necessarily state.profileId/currentProfile(): those track whichever
+  // profile the sidebar currently has selected, which is always the same
+  // profile as the item being checked in normal use, but item.profileId is
+  // the actually-correct, unambiguous source now that pointsPerItem is
+  // per-profile data.
+  const itemProfile = PROFILES.find(p=>p.id===item.profileId) || currentProfile();
+  const {points, maxPoints} = scoreItem({correctSteps, totalOpSteps, wasCorrectFinal}, itemProfile.pointsPerItem);
   item.points = points;
   item.maxPoints = maxPoints;
   // Ratio form is retained only for the per-item "% item score" stat shown
@@ -222,15 +355,7 @@ function handleCheck(){
   item.itemScore = maxPoints>0 ? points/maxPoints : 0;
   render();
 }
-function handleNextItem(){
-  if(state.itemIndex < state.items.length-1){
-    state.itemIndex++;
-    render();
-  } else {
-    state.screen = 'done';
-    render();
-  }
-}
+
 function handleRetrySameItem(){
   // Re-attempt the SAME generated expression from scratch (multiple Verify attempts, per Practice mode rules).
   const item = currentItem();
@@ -248,23 +373,7 @@ function handleRetrySameItem(){
   item._bindings = null;
   render();
 }
-function handleNewRandomAttempt(){
-  // Generate a fresh randomized instance of the same profile.
-  const item = currentItem();
-  if(state.mode==='exam') return;
-  const idx = state.itemIndex;
-  const profile = currentProfile();
-  const inst = generateInstance(profile);
-  const flat0 = flattenInstance(inst.tree);
-  state.items[idx] = {
-    originalTree: inst.tree, originalFlat: flat0, decls: inst.decls, correctFinalValue: inst.correctFinalValue,
-    canonicalTrace: inst.canonicalTrace, workingFlat: deepCloneFlat(flat0),
-    history:[deepCloneFlat(flat0)], trace:[], checked:false, itemScore:null, points:null, maxPoints:null,
-    correctSteps:0, totalOpSteps:0, wasCorrectFinal:null, showSolution:false, playback:null,
-    _bindings: null
-  };
-  render();
-}
+
 function toggleSolution(){
   const item = currentItem();
   item.showSolution = !item.showSolution;
@@ -275,4 +384,3 @@ function toggleSolution(){
   }
   render();
 }
-function restart(){ state.screen='setup'; render(); }

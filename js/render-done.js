@@ -3,7 +3,10 @@ function renderDone(container){
   // Session total is the raw sum of each item's earned/possible points from
   // whichever ITEM_SCORE_MODELS policy is configured (SCORING_CONFIG.model) —
   // shown as an honest [Student Score]/[Max Score], not a percentage.
-  const totalPoints = state.items.reduce((s,i)=>s+(i.points||0),0);
+  // roundPoints() (state.js) strips the floating-point noise that summing
+  // several already-rounded decimal points produces (PER_CHECK's default
+  // scores are 1-decimal fractions, e.g. 0.6, 1.8, 2.4 — see state.js).
+  const totalPoints = roundPoints(state.items.reduce((s,i)=>s+(i.points||0),0));
   const totalMaxPoints = state.items.reduce((s,i)=>s+(i.maxPoints||0),0);
   const correctCount = state.items.filter(i=>i.wasCorrectFinal).length;
 
@@ -32,4 +35,3 @@ function renderDone(container){
     }catch(e){ /* silent no-op */ }
   }
 }
-

@@ -11,12 +11,210 @@
 <link rel="stylesheet" href="css/styles.css">
 <link rel="stylesheet" href="css/moment-feedback.css">
 <link rel="stylesheet" href="css/juice.css">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 </head>
 <body>
-<div class="wrap">
-  <div class="brand"><span class="mark"><i class="fa-solid fa-layer-group"></i></span><h1>Precedify</h1></div>
-  <p class="tagline">Learn how computers evaluate expressions using precedence rules, one operator at a time. Selecting a token doesn't test your arithmetic — it tests whether you know what happens next.</p>
-  <div id="app"></div>
+<!-- Login Overlay -->
+<div id="loginOverlay" class="login-overlay">
+  <div class="login-container">
+    <div class="login-card">
+      <div class="login-header">
+        <div class="login-icon"><i class="fa-solid fa-layer-group"></i></div>
+        <h1>Precedify</h1>
+        <p class="login-subtitle">Master Operator Precedence</p>
+      </div>
+      <form id="loginForm" class="login-form" onsubmit="handleLogin(event)">
+        <div class="form-group">
+          <label for="emailInput">Email Address</label>
+          <input 
+            type="email" 
+            id="emailInput" 
+            placeholder="School email" 
+            required
+            autocomplete="email"
+          />
+        </div>
+        <div class="form-group">
+          <label for="studentNumInput">Student Number</label>
+          <input 
+            type="text" 
+            id="studentNumInput" 
+            placeholder="Student number" 
+            required
+            autocomplete="off"
+          />
+        </div>
+        <button type="submit" class="login-btn">Begin Session</button>
+        <div id="loginError" class="login-error"></div>
+      </form>
+      <p class="login-footer">Learn how computers evaluate expressions, one operator at a time.</p>
+      <button id="settingsBtn" class="login-settings-btn" onclick="openSettingsModal()" title="Settings">
+        <i class="fa-solid fa-gear"></i>
+      </button>
+    </div>
+  </div>
+</div>
+
+<!-- Settings Modal -->
+<div id="settingsModal" class="modal" style="display: none;" role="dialog" aria-labelledby="settingsTitle">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2 id="settingsTitle">Session Settings</h2>
+      <button class="modal-close" onclick="closeSettingsModal()" aria-label="Close settings">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="settings-section">
+        <label class="settings-label">Activity Mode</label>
+        <div class="mode-options">
+          <label class="radio-option">
+            <input type="radio" name="mode" value="practice" checked onchange="handleModeChange()">
+            <span>Practice Mode</span>
+          </label>
+          <label class="radio-option">
+            <input type="radio" name="mode" value="exam" onchange="handleModeChange()">
+            <span>Exam Mode (Timed)</span>
+          </label>
+        </div>
+      </div>
+
+      <div class="settings-section" id="timerSection" style="display: none;">
+        <label class="settings-label" for="timerInput">Timer (minutes)</label>
+        <input 
+          type="number" 
+          id="timerInput" 
+          min="1" 
+          max="999" 
+          value="15" 
+          class="timer-input" 
+          placeholder="Enter minutes" 
+          oninput="validateTimerInput(this)"
+        >
+        <small class="input-hint">Enter a number between 1 and 999 minutes</small>
+      </div>
+
+      <div class="settings-section settings-danger-zone">
+        <label class="settings-label">Danger Zone</label>
+        <p class="input-hint" style="margin-top:0;margin-bottom:10px;">
+          Permanently deletes every student's saved exam progress on this device/browser — not just yours. Use this for an intentional, full reset (e.g. clearing a shared lab machine), not as a routine action.
+        </p>
+        <button type="button" class="danger-btn" onclick="handleClearAllExamProgress()">
+          <i class="fa-solid fa-trash"></i> Clear all exam progress (all students)
+        </button>
+        <div id="clearExamProgressResult" class="input-hint" style="display:none;"></div>
+      </div>
+    </div><!-- closes modal-body -->
+    <div class="modal-footer">
+      <button class="secondary-btn" onclick="closeSettingsModal()">Cancel</button>
+      <button class="primary-btn" onclick="saveSettings()">Save</button>
+    </div>
+  </div><!-- closes modal-content -->
+</div><!-- closes settingsModal -->
+<div id="settingsOverlay" class="modal-overlay" style="display: none;" onclick="closeSettingsModal()"></div>
+
+<!-- Score Summary Modal -->
+<div id="scoreSummaryModal" class="modal" style="display: none;" role="dialog" aria-labelledby="scoreSummaryTitle">
+  <div class="modal-content">
+    <div class="modal-header">
+      <h2 id="scoreSummaryTitle">Score Summary</h2>
+      <button class="modal-close" onclick="closeScoreSummaryModal()" aria-label="Close score summary">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+    </div>
+    <div class="modal-body">
+      <div class="score-summary-user">
+        <div class="ssu-label">Logged in as</div>
+        <div id="scoreSummaryUser" class="ssu-value"></div>
+        <div id="scoreSummaryClock" class="ssu-clock"></div>
+      </div>
+      <div class="score-summary-total">
+        <div id="scoreSummaryTotal" class="sst-value">0 / 0</div>
+        <div class="sst-label">Total score across all profiles</div>
+      </div>
+            <div class="qr-share-section">
+        <div id="scoreQrCodeBox" class="qr-code-box" aria-label="QR code linking to a shareable results page"></div>
+        <p class="qr-caption">Scan to view a shareable results page</p>
+      </div>
+      <!-- Profile breakdown toggle/list intentionally not shown for now —
+           design still undecided. The underlying logic (toggleScoreSummaryDetails,
+           renderScoreSummaryContent's details branch, computeGrandTotalScore)
+           is untouched in score-summary.js; re-add the button + #scoreSummaryDetails
+           div below to bring it back with no JS changes needed. -->
+    </div>
+    <div class="modal-footer">
+      <button class="secondary-btn" onclick="closeScoreSummaryModal()">Close</button>
+    </div>
+  </div>
+</div>
+<div id="scoreSummaryOverlay" class="modal-overlay" style="display: none;" onclick="closeScoreSummaryModal()"></div>
+
+<div id="mainContent" style="display: none;">
+  <!-- Main layout with sidebar navigation and content area -->
+  <div class="main-layout">
+    <!-- Hamburger menu button (visible on mobile and desktop) -->
+    <button id="sidebarToggleBtn" class="sidebar-hamburger" onclick="toggleSidebar()" title="Toggle profile sidebar" aria-label="Toggle profile sidebar" aria-expanded="false">
+      <i class="fa-solid fa-bars"></i>
+    </button>
+
+    <!-- Sidebar backdrop (mobile overlay) -->
+    <div id="sidebarBackdrop" class="sidebar-backdrop" onclick="closeSidebarIfMobile()" aria-hidden="true"></div>
+
+    <!-- Sidebar navigation -->
+    <nav id="profileSidebar" class="profile-sidebar" role="navigation" aria-label="Profile selection">
+      <button id="sidebarCloseBtn" class="sidebar-close-btn" onclick="closeSidebar()" aria-label="Close sidebar">
+        <i class="fa-solid fa-xmark"></i>
+      </button>
+      
+      <div class="sidebar-header">
+        <div class="sidebar-title">Profiles</div>
+        <div class="sidebar-subtitle">Select an exercise profile</div>
+      </div>
+
+      <ul id="profileList" class="profile-list" role="list">
+        <!-- Profile items will be generated here by JavaScript -->
+      </ul>
+
+      <div class="sidebar-footer">
+        <button onclick="logout()" class="sidebar-logout-btn" title="Log out">
+          <i class="fa-solid fa-sign-out-alt"></i> Logout
+        </button>
+      </div>
+    </nav>
+
+    <!-- Main content area -->
+    <main class="content-area" role="main">
+      <div class="app-header">
+        <div class="app-header-left">
+          <div class="brand"><span class="login-icon"><i class="fa-solid fa-layer-group"></i></span><h1>Precedify</h1></div>
+          <p class="tagline">Learn how computers evaluate expressions using precedence rules, one operator at a time.</p>
+        </div>
+        <div class="user-status">
+          <div id="globalControls" class="global-controls">
+            <div id="timerContainer" class="timer-container" style="display: none;">
+              <span class="timer-label">Time remaining:</span>
+              <span id="timerDisplay" class="timer-display">00:00</span>
+            </div>
+            <span id="headerModeTag" class="mode-tag"></span>
+            <button id="headerLinksToggle" class="link-toggle" onclick="toggleConnectors()"
+              title="Toggle the connector line between an operator and the value it produces">
+              <i class="fa-solid fa-arrow-turn-down"></i> <span id="headerLinksToggleText">Links on</span>
+            </button>
+            <button id="scoreSummaryBtn" class="score-summary-btn" onclick="openScoreSummaryModal()" title="View score summary">
+              <i class="fa-solid fa-chart-simple"></i> Scores
+            </button>
+          </div>
+          <div id="userStatusText" class="user-status-text">
+            <div id="userStatusName"></div>
+            <div id="headerClock" class="header-clock"></div>
+          </div>
+        </div>
+      </div>
+      <div id="app"></div>
+      <!-- Item pagination bar for session navigation -->
+      <div id="itemPaginationContainer" class="item-pagination-container" style="display: none;"></div>
+    </main>
+  </div>
 </div>
 
 <!--
@@ -32,6 +230,11 @@
 <script src="js/generator.js"></script>
 <script src="js/language.js"></script>
 <script src="js/state.js"></script>
+<script src="js/exam-persistence.js"></script>
+<script src="js/settings-persistence.js"></script>
+<script src="js/live-clock.js"></script>
+<script src="js/qr-share.js"></script>
+<script src="js/score-summary.js"></script>
 <script src="js/moment-feedback.js"></script>
 <script src="js/juice.js"></script>
 <script src="js/dom-helpers.js"></script>
@@ -39,9 +242,8 @@
 <script src="js/var-final-state.js"></script>
 <script src="js/render-tree.js"></script>
 <script src="js/render-flat.js"></script>
-<script src="js/render-setup.js"></script>
 <script src="js/render-session.js"></script>
-<script src="js/render-done.js"></script>
+<script src="js/login.js"></script>
 <script src="js/main.js"></script>
 </body>
 </html>
