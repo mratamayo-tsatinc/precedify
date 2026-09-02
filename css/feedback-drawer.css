@@ -1,0 +1,213 @@
+/* ============================================================================
+   FEEDBACK DRAWER — additive stylesheet
+   ----------------------------------------------------------------------------
+   Loaded alongside styles.css, moment-feedback.css and console-drawer.css.
+   Every selector here is new — nothing in those files is redeclared or
+   overridden — and every class is only ever applied by feedback-drawer.js,
+   so this file has zero visual effect unless that script is also present
+   and its markup exists in the page. Colors fall back to hard-coded
+   equivalents of styles.css's :root variables (via the second value in
+   each var()), same convention moment-feedback.css / console-drawer.css
+   already use.
+
+   SHELL ONLY: reusable slide-in panel + docked tab. Deliberately reuses
+   THIS APP'S OWN panel look (var(--panel)/var(--line)) rather than
+   console-drawer.css's terminal theme — the feedback card itself
+   (.feedback / .feedback.correct / .feedback.incorrect / .feedback-stats /
+   .mistake-breakdown / .clean-badge, all already defined in styles.css and
+   moment-feedback.css) is dropped into this panel's body UNCHANGED, so it
+   must keep looking exactly like the feedback card it always was — not a
+   terminal printout. This file has no opinion about what's inside the
+   body beyond that; content is set at runtime via
+   render-session.js -> setFeedbackDrawerContent(). See that file's header
+   for the full public API.
+   ============================================================================ */
+
+/* --- docked handle -------------------------------------------------------
+   Sits on the same right edge as .console-drawer-tab, but offset further
+   down (console's is vertically centered via top:50%) so both docked tabs
+   can coexist without overlapping regardless of viewport height. */
+.feedback-drawer-tab {
+  position: fixed;
+  /* Anchored from its OWN top edge, 8px below vertical center, and grows
+     downward from there — the mirror image of console-drawer.css's
+     .console-drawer-tab bottom-anchor. Previously this used a guessed
+     fixed offset (top: calc(50% + 84px)) which assumed the console tab's
+     rendered height; "Console"'s vertical label text is taller than that
+     guess, so the two tabs visibly overlapped. Anchoring both outward from
+     the same center point by their facing edges guarantees a real 16px
+     gap between them regardless of either label's actual height. */
+  top: calc(50% + 8px);
+  right: 0;
+  /* Matches .console-drawer-tab's width exactly (see that rule's comment)
+     rather than shrinking to this tab's own content, which — with its
+     extra status-dot child and a visually wider icon glyph than the
+     console tab's — would otherwise render narrower/wider than its
+     sibling. */
+  width: 44px;
+  z-index: 1200; /* same tier as .console-drawer-tab: above .profile-sidebar
+                     (1150), below either drawer panel (1300) */
+  display: none; /* shown only via showFeedbackDrawerTab() */
+  flex-direction: column;
+  align-items: center;
+  gap: 0.5rem;
+  background: linear-gradient(135deg, var(--good, #4fd9b0), #3bbd97);
+  color: #06231b;
+  border: none;
+  padding: 1rem 0.55rem;
+  border-radius: 10px 0 0 10px;
+  cursor: pointer;
+  box-shadow: -4px 0 14px rgba(0, 0, 0, 0.35);
+  transition: padding 0.15s ease, background 0.15s ease;
+}
+
+.feedback-drawer-tab:hover {
+  padding-right: 0.85rem;
+  background: linear-gradient(135deg, #3bbd97, var(--good, #4fd9b0));
+}
+
+.feedback-drawer-tab:focus-visible {
+  outline: 2px solid var(--good, #4fd9b0);
+  outline-offset: 2px;
+}
+
+.feedback-drawer-tab i {
+  font-size: 1.05rem;
+}
+
+.feedback-drawer-tab-label {
+  writing-mode: vertical-rl;
+  transform: rotate(180deg);
+  font-size: 0.66rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 1.4px;
+  font-family: var(--ui, 'Inter', system-ui, sans-serif);
+}
+
+/* Small correctness dot on the tab itself — lets a student glance at the
+   tab (e.g. after closing the drawer to re-check their derivation) without
+   reopening it. Set via setFeedbackDrawerStatus(correct); absent/hidden
+   until that's called at least once. */
+.feedback-drawer-tab-dot {
+  display: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.feedback-drawer-tab-dot.shown { display: block; }
+.feedback-drawer-tab-dot.correct { background: var(--bg, #0f1116); box-shadow: 0 0 0 2px rgba(15,17,22,0.25); }
+.feedback-drawer-tab-dot.incorrect { background: var(--bad, #ff7373); box-shadow: 0 0 0 2px rgba(15,17,22,0.25); }
+
+@media (max-width: 768px) {
+  .feedback-drawer-tab {
+    padding: 0.85rem 0.45rem;
+  }
+  .feedback-drawer-tab i {
+    font-size: 0.95rem;
+  }
+}
+
+/* --- backdrop: dedicated (not the shared .modal-overlay, not
+   .console-drawer-overlay) so opening this drawer never closes/interferes
+   with Settings, Score Summary, or the console drawer, and so a real modal
+   opened while this drawer is up always visually wins (same z-index
+   reasoning as console-drawer.css). --- */
+.feedback-drawer-overlay {
+  position: fixed;
+  inset: 0;
+  background: rgba(0, 0, 0, 0.45);
+  z-index: 1250;
+  display: none;
+}
+
+/* --- the sliding panel itself --- */
+.feedback-drawer-panel {
+  position: fixed;
+  top: 0;
+  right: 0;
+  height: 100vh;
+  width: 640px;
+  max-width: 92vw;
+  background: var(--panel, #171a21);
+  box-shadow: -8px 0 32px rgba(0, 0, 0, 0.55);
+  z-index: 1300; /* same tier as .console-drawer-panel: above both tabs and
+                     both overlays; below every real modal (9999/10000/10001)
+                     and the confetti layer (9999), so those always win */
+  display: flex;
+  flex-direction: column;
+  transform: translateX(100%);
+  transition: transform 0.32s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.feedback-drawer-panel.open {
+  transform: translateX(0);
+}
+
+@media (max-width: 480px) {
+  .feedback-drawer-panel {
+    width: 100vw;
+    max-width: 100vw;
+  }
+}
+
+/* --- titlebar --- */
+.feedback-drawer-titlebar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.85rem 1rem;
+  background: var(--panel-alt, #1c2029);
+  border-bottom: 1px solid var(--line, #262c38);
+  flex-shrink: 0;
+}
+
+.feedback-drawer-title {
+  flex: 1;
+  margin: 0;
+  color: var(--text, #e6e9f0);
+  font-family: var(--ui, 'Inter', system-ui, sans-serif);
+  font-size: 0.92rem;
+  font-weight: 700;
+  letter-spacing: 0.2px;
+}
+
+.feedback-drawer-close {
+  background: transparent;
+  border: none;
+  color: var(--text-mute, #4b5364);
+  font-size: 1.4rem;
+  line-height: 1;
+  cursor: pointer;
+  padding: 4px 8px;
+  border-radius: 6px;
+  flex-shrink: 0;
+  transition: all 0.15s ease;
+}
+
+.feedback-drawer-close:hover {
+  color: var(--text, #e6e9f0);
+  background: rgba(255, 255, 255, 0.08);
+}
+
+/* --- body: plain scrollable panel padding — the .feedback card supplies
+   its own visual treatment (border/background/radius), same as it always
+   has inline in the main column, so this just needs to give it room. --- */
+.feedback-drawer-body {
+  flex: 1;
+  overflow-y: auto;
+  padding: 1.25rem 1.25rem 2rem;
+}
+
+/* Empty-state placeholder — shown whenever the panel has no content set
+   yet (see feedback-drawer.js's clearFeedbackDrawerContent / initial
+   markup). Content wiring in render-session.js normally replaces
+   #feedbackDrawerContent's children directly, at which point this rule
+   simply no longer matches anything. */
+.feedback-drawer-empty {
+  color: var(--text-mute, #4b5364);
+  font-family: var(--ui, 'Inter', system-ui, sans-serif);
+  font-size: 0.85rem;
+  font-style: italic;
+}

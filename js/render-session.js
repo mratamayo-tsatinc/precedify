@@ -241,6 +241,11 @@ function renderSession(container){
     // flag on the persistent item object (not the DOM), so it survives
     // across rebuilds and the entrance animation fires exactly once, right
     // when Check is first pressed.
+    // Also doubles as the "should the feedback drawer auto-open?" signal
+    // below — both questions are really the same one ("has feedback for
+    // THIS check already been shown to the student"), so they share the
+    // one flag rather than tracking it twice.
+    const isFirstFeedbackShow = !item._feedbackAnimated;
     const fbEnterCls = item._feedbackAnimated ? '' : ' feedback-enter';
     item._feedbackAnimated = true;
     const fb = h('div',{class:'feedback '+(correct?'correct':'incorrect')+fbEnterCls});
@@ -269,16 +274,48 @@ function renderSession(container){
         fb.appendChild(renderCanonicalPlayback(item, assignLabelText, assignLabelCh));
       }
     }
-    container.appendChild(fb);
+    // Feedback now lives in the toggleable feedback drawer (feedback-drawer.js)
+    // instead of inline below the action bar — same content/behavior as
+    // before, just relocated to cut down on page scrolling. Fully guarded:
+    // if feedback-drawer.js isn't loaded (or setFeedbackDrawerContent
+    // throws for any reason), fall straight back to the original inline
+    // placement so a missing/broken drawer module can never hide the
+    // student's result.
+    let placedInDrawer = false;
+    if(typeof setFeedbackDrawerContent === 'function'){
+      try{
+        setFeedbackDrawerContent(fb);
+        placedInDrawer = true;
+      }catch(e){ placedInDrawer = false; }
+    }
+    if(!placedInDrawer) container.appendChild(fb);
+
     // Additive hook for the juice/feel module (js/juice.js) — entirely
-    // optional. fb is already attached to the live DOM at this point, which
-    // spawnConfetti needs for accurate positioning. If the script isn't
-    // loaded, or it fails for any reason, this is a silent no-op.
+    // optional. fb must already be attached to the live DOM (true either
+    // way above — the drawer's content div is part of the live document
+    // once setFeedbackDrawerContent has run) for spawnConfetti's
+    // positioning to be accurate. If the script isn't loaded, or it fails
+    // for any reason, this is a silent no-op.
     if(typeof renderItemCelebration === 'function'){
       try{
         const celebration = renderItemCelebration(item, fb);
         if(celebration) fb.appendChild(celebration);
       }catch(e){ /* silent no-op */ }
+    }
+
+    if(placedInDrawer){
+      // Keep the tab visible and its correct/incorrect dot in sync, and
+      // auto-open the drawer the FIRST time this item's feedback is shown
+      // (mirroring the one-shot behavior isFirstFeedbackShow/
+      // _feedbackAnimated already governs for the entrance animation).
+      // Later re-renders of the SAME check — e.g. the once-a-second
+      // re-renders that happen while the answer-key playback below is
+      // auto-advancing — never force it back open if the student closed
+      // it; a fresh item (item.checked false again) resets the flag via
+      // the branch below, so the NEXT check still auto-opens.
+      if(typeof showFeedbackDrawerTab === 'function') showFeedbackDrawerTab();
+      if(typeof setFeedbackDrawerStatus === 'function') setFeedbackDrawerStatus(correct);
+      if(isFirstFeedbackShow && typeof openFeedbackDrawer === 'function') openFeedbackDrawer();
     }
 
     if(state.mode==='practice'){
@@ -289,6 +326,19 @@ function renderSession(container){
       );
       container.appendChild(bottomBar);
     }
+  } else if(typeof clearFeedbackDrawerContent === 'function'){
+    // This item hasn't been checked yet — make sure feedback left over
+    // from a PREVIOUS item (or a previous attempt at this one, after
+    // Reset/Try again) doesn't linger visible in the drawer. Guarded like
+    // every other call into feedback-drawer.js: a missing/broken module
+    // here is a silent no-op, never a thrown error.
+    try{
+      clearFeedbackDrawerContent();
+      if(typeof setFeedbackDrawerStatus === 'function') setFeedbackDrawerStatus(null);
+      if(typeof hideFeedbackDrawerTab === 'function') hideFeedbackDrawerTab();
+      if(typeof isFeedbackDrawerOpen === 'function' && isFeedbackDrawerOpen()
+         && typeof closeFeedbackDrawer === 'function') closeFeedbackDrawer();
+    }catch(e){ /* no-op */ }
   }
 }
 

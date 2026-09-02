@@ -11,6 +11,8 @@
 <link rel="stylesheet" href="css/styles.css">
 <link rel="stylesheet" href="css/moment-feedback.css">
 <link rel="stylesheet" href="css/juice.css">
+<link rel="stylesheet" href="css/console-drawer.css">
+<link rel="stylesheet" href="css/feedback-drawer.css">
 <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
 </head>
 <body>
@@ -149,6 +151,59 @@
 </div>
 <div id="scoreSummaryOverlay" class="modal-overlay" style="display: none;" onclick="closeScoreSummaryModal()"></div>
 
+<!-- Console Drawer: reusable slide-in panel with a terminal rendering
+     effect. Shell only — content is wired up separately via
+     setConsoleDrawerContent()/showConsoleDrawerTab(). See console-drawer.js
+     for the full public API. -->
+<button id="consoleDrawerTab" class="console-drawer-tab" onclick="toggleConsoleDrawer()"
+        style="display: none;" aria-label="Show console" aria-controls="consoleDrawerPanel" aria-expanded="false">
+  <i class="fa-solid fa-terminal" aria-hidden="true"></i>
+  <span class="console-drawer-tab-label">Console</span>
+</button>
+
+<div id="consoleDrawerPanel" class="console-drawer-panel" role="dialog" aria-labelledby="consoleDrawerTitle" aria-hidden="true">
+  <div class="console-drawer-titlebar">
+    <div class="console-drawer-lights" aria-hidden="true">
+      <span class="console-drawer-dot red"></span>
+      <span class="console-drawer-dot yellow"></span>
+      <span class="console-drawer-dot green"></span>
+    </div>
+    <h2 id="consoleDrawerTitle" class="console-drawer-title">Console</h2>
+    <button class="console-drawer-close" onclick="closeConsoleDrawer()" aria-label="Close console">
+      <i class="fa-solid fa-xmark"></i>
+    </button>
+  </div>
+  <div class="console-drawer-body">
+    <pre id="consoleDrawerContent" class="console-drawer-content"><span class="console-drawer-empty">Nothing to show yet.</span></pre>
+  </div>
+</div>
+<div id="consoleDrawerOverlay" class="console-drawer-overlay" onclick="closeConsoleDrawer()" aria-hidden="true"></div>
+
+<!-- Feedback Drawer: reusable slide-in panel that now holds the
+     "Check answer" feedback card (previously shown inline below the
+     action bar). Shell only — content is wired up separately via
+     setFeedbackDrawerContent(), called from render-session.js. See
+     feedback-drawer.js for the full public API. -->
+<button id="feedbackDrawerTab" class="feedback-drawer-tab" onclick="toggleFeedbackDrawer()"
+        style="display: none;" aria-label="Show feedback" aria-controls="feedbackDrawerPanel" aria-expanded="false">
+  <i class="fa-solid fa-clipboard-check" aria-hidden="true"></i>
+  <span id="feedbackDrawerTabDot" class="feedback-drawer-tab-dot" aria-hidden="true"></span>
+  <span class="feedback-drawer-tab-label">Feedback</span>
+</button>
+
+<div id="feedbackDrawerPanel" class="feedback-drawer-panel" role="dialog" aria-labelledby="feedbackDrawerTitle" aria-hidden="true">
+  <div class="feedback-drawer-titlebar">
+    <h2 id="feedbackDrawerTitle" class="feedback-drawer-title">Feedback</h2>
+    <button class="feedback-drawer-close" onclick="closeFeedbackDrawer()" aria-label="Close feedback">
+      <i class="fa-solid fa-xmark"></i>
+    </button>
+  </div>
+  <div class="feedback-drawer-body">
+    <div id="feedbackDrawerContent"><span class="feedback-drawer-empty">No feedback yet — check an answer to see it here.</span></div>
+  </div>
+</div>
+<div id="feedbackDrawerOverlay" class="feedback-drawer-overlay" onclick="closeFeedbackDrawer()" aria-hidden="true"></div>
+
 <div id="mainContent" style="display: none;">
   <!-- Main layout with sidebar navigation and content area -->
   <div class="main-layout">
@@ -238,6 +293,9 @@
 <script src="js/moment-feedback.js"></script>
 <script src="js/juice.js"></script>
 <script src="js/dom-helpers.js"></script>
+<script src="js/console-drawer.js"></script>
+<script src="js/console-drawer-content.js"></script>
+<script src="js/feedback-drawer.js"></script>
 <script src="js/connector-lines.js"></script>
 <script src="js/var-final-state.js"></script>
 <script src="js/render-tree.js"></script>
