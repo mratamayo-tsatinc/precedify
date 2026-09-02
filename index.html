@@ -255,6 +255,14 @@
               title="Toggle the connector line between an operator and the value it produces">
               <i class="fa-solid fa-arrow-turn-down"></i> <span id="headerLinksToggleText">Links on</span>
             </button>
+            <button id="varFloatToggle" class="link-toggle" onclick="toggleVarFinalFloatVisible()"
+              title="Show/hide the floating variable final-state panel">
+              <i class="fa-solid fa-table-cells"></i> <span id="varFloatToggleText">Vars</span>
+            </button>
+            <button id="varFlyAnimToggle" class="link-toggle" onclick="toggleVarFinalFlyAnim()"
+              title="Toggle fly-in animation for variable value updates (off = instant, matching the existing pulse)">
+              <i class="fa-solid fa-wand-magic-sparkles"></i> <span id="varFlyAnimToggleText">Fly-in</span>
+            </button>
             <button id="scoreSummaryBtn" class="score-summary-btn" onclick="openScoreSummaryModal()" title="View score summary">
               <i class="fa-solid fa-chart-simple"></i> Scores
             </button>
@@ -298,6 +306,7 @@
 <script src="js/feedback-drawer.js"></script>
 <script src="js/connector-lines.js"></script>
 <script src="js/var-final-state.js"></script>
+<script src="js/var-final-float.js"></script>
 <script src="js/render-tree.js"></script>
 <script src="js/render-flat.js"></script>
 <script src="js/render-session.js"></script>

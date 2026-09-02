@@ -199,12 +199,17 @@ function renderSession(container){
   });
 
   evalPanel.appendChild(timeline);
-  // Static reference section, independent of trace progress — see
-  // var-final-state.js for why it's always shown in full regardless of how
-  // far the student has gotten.
-  const varFinalSection = renderVariableFinalState(item);
-  if(varFinalSection) evalPanel.appendChild(varFinalSection);
   container.appendChild(evalPanel);
+  // Variable final state now renders as a floating, draggable panel
+  // (var-final-float.js) instead of living inline at the bottom of the eval
+  // panel — see that file for the visibility/fly-in toggles. Must run AFTER
+  // evalPanel is attached above: its optional fly-in mode looks up each
+  // value's origin token in the now-live timeline, the same way
+  // connector-lines.js locates its srcEl/dstEl. Guarded like the other
+  // optional-module hooks in this file (renderMomentFeedbackBlock,
+  // setFeedbackDrawerContent, etc.) so a missing/broken module here can
+  // never break the rest of the session view.
+  if(typeof renderVariableFinalFloat === 'function') renderVariableFinalFloat(item);
 
   // action bar
   const canUndo = !item.checked && item.history.length>1;
