@@ -1484,6 +1484,43 @@ button:focus-visible, [tabindex]:focus-visible{outline:2px solid var(--op-glow);
   .app-header {
     padding: 1rem;
     padding-top: 4rem;
+    /* Left (brand/tagline) and right (mode tag, toggles, Scores) no longer
+       fight for one row's width — that's what was pushing the right side
+       past the viewport edge, where .content-area's overflow:hidden (see
+       above) clipped it out of view instead of it ever getting a chance to
+       scroll or wrap into place. Wrapping the header itself lets the
+       right-hand column drop to its own row, sized to the full header
+       width, so its own flex-wrap (see .global-controls) can spread its
+       buttons across as many rows as it actually needs. */
+    flex-wrap: wrap;
+    row-gap: 10px;
+  }
+
+  .app-header-left {
+    /* Without an explicit basis, flex:1's default 0% basis lets this
+       shrink-to-content, which — combined with .user-status now being
+       allowed onto its own wrapped row below — is exactly what makes room
+       for that second row instead of both columns still cramming into one. */
+    flex-basis: 100%;
+  }
+
+  .user-status {
+    /* Take the header's full width on its own row rather than staying
+       shrink-to-content-and-right-aligned next to the brand, which is what
+       previously left it fighting the brand block for horizontal space. */
+    flex: 1 1 100%;
+    text-align: left;
+  }
+
+  .global-controls {
+    /* Right-aligned made sense sharing a row with the brand; now that this
+       is its own full-width row, left-aligned reads more naturally and
+       avoids the buttons visually stranding themselves at the far edge. */
+    justify-content: flex-start;
+  }
+
+  .user-status-text {
+    text-align: left;
   }
 
   .sidebar-hamburger {
