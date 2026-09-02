@@ -23,13 +23,15 @@
 //                                       connector-lines.js locates its
 //                                       srcEl/dstEl.
 //   toggleVarFinalFloatVisible()     — header button: show/hide the panel.
-//   toggleVarFinalFlyAnim()          — header button: fly-in vs instant.
 //
 // ----------------------------------------------------------------------------
 // TWO INDEPENDENT TOGGLES
 // ----------------------------------------------------------------------------
 //   floatVisible   — whether the floating panel is shown at all. Default
 //                     true (matches the old always-shown inline behavior).
+//                     Controlled from the global app header (#varFloatToggle
+//                     in index.html), since it's meaningful whether or not
+//                     the panel currently exists on screen.
 //   flyAnimEnabled — whether a newly-committed binding's value travels from
 //                     its origin token in the timeline to its card (true),
 //                     or simply appears in place with the existing one-shot
@@ -39,6 +41,17 @@
 //                     renderVariableFinalState(item) from var-final-state.js,
 //                     so "no animation" really does mean "exactly the
 //                     current behavior", just inside a floating shell.
+//                     Controlled from a small toggle INSIDE the panel's own
+//                     header (see mountVarFinalFloatPanel) rather than the
+//                     global app header — this setting only means anything
+//                     while the panel it animates is actually on screen, and
+//                     it isn't a session-wide concern the way floatVisible
+//                     or showConnectors are, so it has no business occupying
+//                     permanent space in the app header (nor being reachable
+//                     at all while there's nothing on screen for it to
+//                     affect — previously it lived there disabled, which
+//                     still cost a control's worth of header space for no
+//                     benefit).
 //
 // The animated path (buildAnimatedVarFinalSection below) necessarily
 // duplicates var-final-state.js's row-building loop, because it needs to
@@ -57,11 +70,12 @@
 let floatVisible = true;
 let flyAnimEnabled = false;
 
-// Flight duration, in ms — adjustable live via the slider rendered inside
-// the panel body (see renderVarFinalSpeedSlider) whenever fly-in mode is
+// Flight duration, in ms — one of three discrete levels (1s/2s/3s), chosen
+// via the segmented toggle rendered inside the panel body (see
+// renderVarFinalSpeedToggle) whenever fly-in mode is
 // on. Module-local like everything else here, so it persists across
-// re-renders even though the slider's own DOM node is rebuilt each time.
-let flightDurationMs = 500;
+// re-renders even though the toggle's own DOM node is rebuilt each time.
+let flightDurationMs = 1000;
 
 // Dragged position, in viewport px — null until the user actually drags the
 // panel at least once, in which case the default CSS-anchored corner
@@ -85,8 +99,11 @@ let dragOffsetX = 0, dragOffsetY = 0;
 let floatWasMounted = false;
 
 // ----------------------------------------------------------------------------
-// Toggle buttons (wired from index.html, mirroring toggleConnectors()'s
-// header-button pattern in connector-lines.js).
+// Toggles. toggleVarFinalFloatVisible is wired from index.html, mirroring
+// toggleConnectors()'s header-button pattern in connector-lines.js.
+// toggleVarFinalFlyAnim is wired from the button built in
+// mountVarFinalFloatPanel below instead — see the module header comment for
+// why it doesn't belong in the global app header.
 // ----------------------------------------------------------------------------
 function toggleVarFinalFloatVisible(){
   floatVisible = !floatVisible;
@@ -94,35 +111,23 @@ function toggleVarFinalFloatVisible(){
   render();
 }
 function toggleVarFinalFlyAnim(){
-  // Inert while the panel itself is hidden — there's nothing on screen for
-  // this to affect, and the button is disabled to match (see
-  // syncVarFinalFloatToggleUI), but guard here too in case it's ever
-  // reachable another way (keyboard, programmatic click, etc.).
-  if(!floatVisible) return;
+  // Only ever wired to a button rendered inside the panel's own header (see
+  // mountVarFinalFloatPanel), which only exists while floatVisible is true —
+  // so unlike before, there's no "inert/disabled while hidden" state to
+  // guard against here; if this runs, the panel is on screen.
   flyAnimEnabled = !flyAnimEnabled;
-  syncVarFinalFloatToggleUI();
-  // No render() needed here — this only changes how the NEXT commit is
-  // shown, not anything currently on screen.
+  // A render() IS needed here now (the old header-button version didn't
+  // need one): the toggle button's own active/inactive look and the speed
+  // toggle's visibility both live inside the panel body, which is rebuilt
+  // by render() — without this the click would silently do nothing until
+  // some unrelated render happened to fire.
+  render();
 }
 function syncVarFinalFloatToggleUI(){
   const vBtn = document.getElementById('varFloatToggle');
   const vText = document.getElementById('varFloatToggleText');
   if(vBtn) vBtn.classList.toggle('active', floatVisible);
   if(vText) vText.textContent = floatVisible ? 'Vars on' : 'Vars off';
-
-  const aBtn = document.getElementById('varFlyAnimToggle');
-  const aText = document.getElementById('varFlyAnimToggleText');
-  if(aBtn){
-    aBtn.classList.toggle('active', flyAnimEnabled);
-    // Only meaningful while the panel it animates is actually visible —
-    // hidden panel means there's nothing to fly values into, so the
-    // control is disabled rather than left clickable-but-pointless.
-    aBtn.disabled = !floatVisible;
-    aBtn.title = floatVisible
-      ? 'Toggle fly-in animation for variable value updates (off = instant, matching the existing pulse)'
-      : 'Show the variable panel first to control its fly-in animation';
-  }
-  if(aText) aText.textContent = flyAnimEnabled ? 'Fly-in on' : 'Fly-in off';
 }
 
 // ----------------------------------------------------------------------------
@@ -248,9 +253,15 @@ function buildAnimatedVarFinalSection(item){
 function mountVarFinalFloatPanel(sectionEl, flights, playEntrance){
   const panel = h('div',{class:'var-final-float'+(playEntrance?' var-final-float-enter':''), style: floatPositionStyle()});
 
-  const header = h('div',{class:'var-final-float-header', onmousedown: onVarFinalFloatDragStart},
+  const flyTitle = flyAnimEnabled
+    ? 'Turn off fly-in animation (values will appear instantly, matching the existing pulse)'
+    : 'Turn on fly-in animation for variable value updates';
+  const header = h('div',{class:'var-final-float-header', onmousedown: onVarFinalFloatDragStart, ontouchstart: onVarFinalFloatDragStart},
     h('i',{class:'fa-solid fa-up-down-left-right var-final-float-drag-icon', 'aria-hidden':'true'}),
     h('span',{class:'var-final-float-title-label'}, 'Variable final state'),
+    h('button',{class:'var-final-float-fly-toggle'+(flyAnimEnabled?' active':''), title:flyTitle, 'aria-label':flyTitle, 'aria-pressed':String(flyAnimEnabled),
+      onclick: (e)=>{ e.stopPropagation(); toggleVarFinalFlyAnim(); }
+    }, h('i',{class:'fa-solid fa-wand-magic-sparkles','aria-hidden':'true'})),
     h('button',{class:'var-final-float-close', title:'Hide this panel', 'aria-label':'Hide this panel',
       onclick: (e)=>{ e.stopPropagation(); toggleVarFinalFloatVisible(); }
     }, h('i',{class:'fa-solid fa-xmark','aria-hidden':'true'}))
@@ -258,7 +269,7 @@ function mountVarFinalFloatPanel(sectionEl, flights, playEntrance){
   panel.appendChild(header);
 
   const body = h('div',{class:'var-final-float-body'});
-  if(flyAnimEnabled) body.appendChild(renderVarFinalSpeedSlider());
+  if(flyAnimEnabled) body.appendChild(renderVarFinalSpeedToggle());
   body.appendChild(sectionEl);
   panel.appendChild(body);
 
@@ -282,35 +293,62 @@ function floatPositionStyle(){
   return ''; // default anchored corner position comes from the injected CSS
 }
 
+// Works for both MouseEvent (clientX/clientY) and TouchEvent (only exposes
+// coordinates via .touches/.changedTouches) — every drag handler below reads
+// the pointer position through this instead of assuming e.clientX exists.
+function varFinalFloatEventPoint(e){
+  if(e.touches && e.touches.length) return {x:e.touches[0].clientX, y:e.touches[0].clientY};
+  if(e.changedTouches && e.changedTouches.length) return {x:e.changedTouches[0].clientX, y:e.changedTouches[0].clientY};
+  return {x:e.clientX, y:e.clientY};
+}
 function onVarFinalFloatDragStart(e){
+  // The header's mousedown/touchstart listener also fires when the event
+  // originates on one of the header's own buttons (close, fly-toggle), via
+  // normal bubbling. That's harmless for mouse — preventDefault() on
+  // mousedown doesn't stop the click that follows on mouseup — but on touch
+  // devices preventDefault()ing touchstart can suppress the synthetic click
+  // Safari fires afterward, which would silently break tapping those
+  // buttons. Bail out before starting a drag (and before calling
+  // preventDefault at all) whenever the touch/click actually started on one
+  // of them.
+  if(e.target.closest('.var-final-float-close, .var-final-float-fly-toggle')) return;
   const panel = e.currentTarget.closest('.var-final-float');
   if(!panel) return;
   dragging = true;
   dragPanelEl = panel;
   const rect = panel.getBoundingClientRect();
-  dragOffsetX = e.clientX - rect.left;
-  dragOffsetY = e.clientY - rect.top;
+  const pt = varFinalFloatEventPoint(e);
+  dragOffsetX = pt.x - rect.left;
+  dragOffsetY = pt.y - rect.top;
   panel.classList.add('var-final-float-dragging');
+  // For touch, this also stops the gesture from ALSO being interpreted as a
+  // page scroll/pull-to-refresh while dragging the panel.
   e.preventDefault();
 }
 function onVarFinalFloatDragMove(e){
   if(!dragging) return;
   // The panel's DOM node is rebuilt on every render() — including the 1s
   // auto-advance tick that drives solution-playback (see main.js). If that
-  // fires mid-drag, the node we grabbed at mousedown is now detached; grab
-  // whichever '.var-final-float' is currently live instead of silently
-  // freezing until mouseup. The offset stays valid since it's relative to
-  // where the pointer sits within the panel, not tied to a specific node.
+  // fires mid-drag, the node we grabbed at mousedown/touchstart is now
+  // detached; grab whichever '.var-final-float' is currently live instead
+  // of silently freezing until mouseup/touchend. The offset stays valid
+  // since it's relative to where the pointer sits within the panel, not
+  // tied to a specific node.
   if(!dragPanelEl || !dragPanelEl.isConnected){
     dragPanelEl = document.querySelector('.var-final-float');
     if(!dragPanelEl){ dragging = false; return; }
     dragPanelEl.classList.add('var-final-float-dragging');
   }
-  floatPos = clampVarFinalFloatPoint(e.clientX - dragOffsetX, e.clientY - dragOffsetY, dragPanelEl);
+  const pt = varFinalFloatEventPoint(e);
+  floatPos = clampVarFinalFloatPoint(pt.x - dragOffsetX, pt.y - dragOffsetY, dragPanelEl);
   dragPanelEl.style.left = floatPos.left+'px';
   dragPanelEl.style.top = floatPos.top+'px';
   dragPanelEl.style.right = 'auto';
   dragPanelEl.style.bottom = 'auto';
+  // Touchmove is registered non-passive (see the addEventListener call
+  // below) specifically so this preventDefault is allowed to actually stop
+  // the underlying page from scrolling while a touch-drag is in progress.
+  e.preventDefault();
 }
 function onVarFinalFloatDragEnd(){
   if(!dragging) return;
@@ -319,11 +357,27 @@ function onVarFinalFloatDragEnd(){
   dragPanelEl = null;
 }
 // Attached once at module load (not per-render) — dragging spans exactly
-// one continuous mousedown→mouseup gesture during which no render() ever
-// fires, so caching dragPanelEl for that gesture's duration is safe; the
-// listener itself just needs to exist for the lifetime of the page.
+// one continuous mousedown→mouseup (or touchstart→touchend) gesture during
+// which no render() ever fires, so caching dragPanelEl for that gesture's
+// duration is safe; the listeners themselves just need to exist for the
+// lifetime of the page.
+//
+// Touch listeners are registered alongside the existing mouse ones —
+// touchstart is wired directly on the panel header (see
+// mountVarFinalFloatPanel), same as onmousedown, while move/end/cancel are
+// document-level like their mouse counterparts, since a drag gesture can
+// carry the finger anywhere on screen, not just over the header. touchmove
+// must be {passive:false} — the whole point of calling preventDefault()
+// inside onVarFinalFloatDragMove is to stop the page itself from scrolling
+// underneath the drag, and a passive listener isn't allowed to do that.
+// touchcancel (e.g. an incoming call interrupts the gesture) is mapped to
+// the same end handler as touchend, so a dropped gesture can't leave
+// `dragging` stuck true.
 document.addEventListener('mousemove', onVarFinalFloatDragMove);
 document.addEventListener('mouseup', onVarFinalFloatDragEnd);
+document.addEventListener('touchmove', onVarFinalFloatDragMove, {passive:false});
+document.addEventListener('touchend', onVarFinalFloatDragEnd);
+document.addEventListener('touchcancel', onVarFinalFloatDragEnd);
 
 function clampVarFinalFloatPoint(left, top, panelEl){
   const w = panelEl.offsetWidth, hgt = panelEl.offsetHeight;
@@ -342,24 +396,30 @@ function clampVarFinalFloatPosition(panel){
   }
 }
 
-// Live speed control for the fly-in animation, shown only while fly-in
-// mode is on (a duration slider means nothing when values just appear
-// instantly). Purely local UI — updating flightDurationMs doesn't need a
-// render(), since the very next flight (spawnVarFinalFlyingToken) just
-// reads the module variable directly; only the on-screen label needs to
-// stay in sync with the thumb as it moves.
-function renderVarFinalSpeedSlider(){
-  const label = h('span',{class:'var-final-float-speed-label'}, `Fly-in duration: ${flightDurationMs}ms`);
-  const input = h('input',{
-    type:'range', min:'150', max:'3000', step:'50', value:String(flightDurationMs),
-    class:'var-final-float-speed-slider',
-    'aria-label':'Fly-in animation duration in milliseconds',
-    oninput:(e)=>{
-      flightDurationMs = Number(e.target.value);
-      label.textContent = `Fly-in duration: ${flightDurationMs}ms`;
-    }
+// Speed control for the fly-in animation, shown only while fly-in mode is
+// on (meaningless when values just appear instantly). A discrete 3-level
+// segmented toggle rather than a slider: this is a "set once and forget"
+// preference, not something dragged around often, so a full-width range
+// input was disproportionate to how often it's actually touched. Clicking
+// a level DOES need a render() (unlike the old slider's live oninput),
+// since the active segment's highlighted state lives in this same markup
+// and has to be redrawn.
+const SPEED_LEVELS = [1000, 2000, 3000];
+function renderVarFinalSpeedToggle(){
+  const label = h('span',{class:'var-final-float-speed-label'},
+    h('i',{class:'fa-solid fa-stopwatch', 'aria-hidden':'true'}), ' Fly-in speed');
+  const group = h('div',{class:'var-final-float-speed-toggle', role:'group', 'aria-label':'Fly-in animation speed'});
+  SPEED_LEVELS.forEach(ms=>{
+    const active = flightDurationMs===ms;
+    const text = `${ms/1000}s`;
+    group.appendChild(h('button',{
+      class:'var-final-float-speed-btn'+(active?' active':''),
+      'aria-pressed':String(active),
+      'aria-label':`Fly-in duration ${text}`,
+      onclick:()=>{ flightDurationMs = ms; render(); }
+    }, text));
   });
-  return h('div',{class:'var-final-float-speed-row'}, label, input);
+  return h('div',{class:'var-final-float-speed-row'}, label, group);
 }
 
 // ----------------------------------------------------------------------------
@@ -467,7 +527,7 @@ function ensureVarFinalFloatStyles(){
 .var-final-float-dragging{ user-select:none; }
 .var-final-float-header{
   display:flex; align-items:center; gap:8px; padding:9px 10px;
-  border-bottom:1px solid var(--line); cursor:grab; user-select:none;
+  border-bottom:1px solid var(--line); cursor:grab; user-select:none; touch-action:none;
   font-family:var(--ui); font-size:11px; text-transform:uppercase; letter-spacing:0.08em;
   color:var(--text-mute); font-weight:700;
 }
@@ -479,16 +539,35 @@ function ensureVarFinalFloatStyles(){
   border-radius:4px; line-height:1; font-size:12px;
 }
 .var-final-float-close:hover{ color:var(--text); background:var(--panel-alt); }
+/* Fly-in toggle — lives in the panel's own header instead of the global app
+   header, since it only ever means something while this panel is already
+   on screen (see the module header comment above). Same slot/sizing as the
+   close button next to it; only the active-state color differs, matching
+   the app's existing .link-toggle.active convention. */
+.var-final-float-fly-toggle{
+  background:none; border:none; color:var(--text-mute); cursor:pointer; padding:2px 5px;
+  border-radius:4px; line-height:1; font-size:12px;
+}
+.var-final-float-fly-toggle:hover{ color:var(--text); background:var(--panel-alt); }
+.var-final-float-fly-toggle.active{ color:var(--op-glow); }
 .var-final-float-body{ padding:12px 12px 14px; max-height:60vh; overflow:auto; }
 .var-final-float-speed-row{
-  display:flex; flex-direction:column; gap:5px;
+  display:flex; align-items:center; justify-content:space-between; gap:8px;
   margin-bottom:12px; padding-bottom:12px; border-bottom:1px solid var(--line-soft);
 }
 .var-final-float-speed-label{
+  display:flex; align-items:center; gap:5px; white-space:nowrap;
   font-family:var(--ui); font-size:10.5px; color:var(--text-mute);
   text-transform:uppercase; letter-spacing:0.06em;
 }
-.var-final-float-speed-slider{ width:100%; accent-color:var(--op); cursor:pointer; }
+.var-final-float-speed-toggle{ display:flex; gap:4px; }
+.var-final-float-speed-btn{
+  background:none; border:1px solid var(--line); color:var(--text-mute); cursor:pointer;
+  padding:3px 8px; border-radius:4px; font-family:var(--ui); font-size:10.5px; font-weight:700;
+  line-height:1.4;
+}
+.var-final-float-speed-btn:hover{ color:var(--text); border-color:var(--text-dim); }
+.var-final-float-speed-btn.active{ color:var(--op-glow); border-color:var(--op-glow); }
 /* This section's own title/margins are meant for sitting inline at the
    bottom of .eval-panel — inside the float it's redundant with the
    header's own title (above) and the spacing needs to start at the body's
@@ -497,10 +576,6 @@ function ensureVarFinalFloatStyles(){
 .var-final-float .var-final-title{ display:none; }
 @keyframes var-final-float-in{ from{ opacity:0; transform:translateY(-6px); } to{ opacity:1; transform:translateY(0); } }
 .var-final-flying{ pointer-events:none; z-index:920; box-shadow:0 6px 18px rgba(0,0,0,0.4); }
-/* .link-toggle (index.html header buttons) has no built-in disabled look —
-   this only needs to cover #varFlyAnimToggle, which is inert whenever the
-   panel it controls isn't visible (see syncVarFinalFloatToggleUI). */
-#varFlyAnimToggle:disabled{ opacity:0.35; cursor:not-allowed; text-decoration:none; }
 @media (max-width:520px){
   .var-final-float{ width:calc(100vw - 32px); }
 }
